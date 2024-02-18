@@ -1,0 +1,9 @@
+lib/*
+bin/*
+include/*
+lib64/*
+pyvenv.cfg
+HelloWorld/build
+HelloWorld/dist
+QtTest/build
+QtTest/dist

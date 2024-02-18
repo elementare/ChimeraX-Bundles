@@ -1,0 +1,7 @@
+ChimeraX_HelloWorld.egg-info/PKG-INFO
+ChimeraX_HelloWorld.egg-info/SOURCES.txt
+ChimeraX_HelloWorld.egg-info/dependency_links.txt
+ChimeraX_HelloWorld.egg-info/requires.txt
+ChimeraX_HelloWorld.egg-info/top_level.txt
+src/__init__.py
+src/cmd.py

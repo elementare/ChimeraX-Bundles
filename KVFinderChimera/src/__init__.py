@@ -26,16 +26,16 @@ class _MyAPI(BundleAPI):
         # trailing whitespace), and create and return an instance of the
         # appropriate class from the ``tool`` module.
         if ti.name == "Tutorial (Qt)":
-            from . import tool
-            return tool.TutorialTool(session, ti.name)
+            from . import toolPymol
+            return toolPymol.TutorialTool(session, ti.name)
         raise ValueError("trying to start unknown tool: %s" % ti.name)
 
     @staticmethod
     def get_class(class_name):
         # class_name will be a string
         if class_name == "TutorialTool":
-            from . import tool
-            return tool.TutorialTool
+            from . import toolPymol
+            return toolPymol.TutorialTool
         raise ValueError("Unknown class name '%s'" % class_name)
 
 # Create the ``bundle_api`` object that ChimeraX expects.

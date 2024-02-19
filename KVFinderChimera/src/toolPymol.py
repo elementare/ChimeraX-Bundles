@@ -26,7 +26,7 @@ from __future__ import absolute_import, annotations, print_function
 import json
 import os
 from typing import Any, Dict, Optional
-
+from chimerax.core.tools import ToolInstance
 import toml
 from PyQt6 import QtCore, QtWidgets
 

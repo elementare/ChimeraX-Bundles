@@ -7,3 +7,4 @@ HelloWorld/build
 HelloWorld/dist
 QtTest/build
 QtTest/dist
+.env

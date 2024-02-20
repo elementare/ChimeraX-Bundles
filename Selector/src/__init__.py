@@ -4,7 +4,6 @@
 from chimerax.core.toolshed import BundleAPI
 
 
-
 # Subclass from chimerax.core.toolshed.BundleAPI and
 
 # override the method for registering selectors,

@@ -1,9 +1,10 @@
 Metadata-Version: 2.1
-Name: ChimeraX-TutorialToolQt
+Name: ChimeraX-KVFinderQt
 Version: 0.1
-Summary: Example for adding a graphical interface tool
-Home-page: https://www.rbvi.ucsf.edu/chimerax/
-Author: UCSF RBVI
+Summary: An algorithm to find cavities
+Home-page: https://cnpem.br/
+Author: Brazilian Center for Research in Energy and Materials
+      (CNPEM)
 Author-email: chimerax@cgl.ucsf.edu
 Classifier: Framework :: ChimeraX
 Classifier: Intended Audience :: Science/Research
@@ -19,11 +20,9 @@ Classifier: Environment :: X11 Applications
 Classifier: Operating System :: MacOS :: MacOS X
 Classifier: Operating System :: Microsoft :: Windows :: Windows 10
 Classifier: Operating System :: POSIX :: Linux
-Classifier: ChimeraX :: Bundle :: General :: 1,1 :: chimerax.tut_tool_qt ::  :: 
-Classifier: ChimeraX :: Tool :: Tutorial (Qt) ::
-      General :: Graphical interface example
+Classifier: ChimeraX :: Bundle :: Structure Analysis :: 1,1 :: chimerax.kvfinder_qt ::  :: 
+Classifier: ChimeraX :: Tool :: Cavities ::
+      Structure Analysis :: Achar cavidades
 Requires-Python: >=3.7
 
-Example code for implementing ChimeraX bundle.
-
-Implements tool "Tutorial (Qt)" to log typed user input.
+Pensando na descrição

@@ -14,10 +14,10 @@
 from chimerax.core.tools import ToolInstance
 from chimerax.atomic import StructureSeq, Structure, selected_atoms, all_atoms, all_atomic_structures
 from chimerax.core.commands import run
+from os.path import expanduser
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QDialog
 from PyQt5.QtCore import QThread, pyqtSlot, pyqtSignal
-from os.path import expanduser
 import chimerax as cx
 import os
 import pyKVFinder
@@ -42,6 +42,7 @@ class _Default(object):
         self.cavity_representation = "Filtered"
         self.base_name = "output"
         self.output_dir_path = expanduser('~/KVFinderResults')
+        self.region_option = "Default"
         #######################
         ### File Locations  ###
         #######################
@@ -89,10 +90,12 @@ class KVFinder(ToolInstance):
         _translate = QtCore.QCoreApplication.translate
         self.display_name = "KVFinder"
         self._default = _Default()
+        self.region_option = self._default.region_option
 
         self.app = QtWidgets.QApplication(sys.argv)
         self.tool_window = QtWidgets.QMainWindow()
         self.tool_window.fill_context_menu = self.fill_context_menu
+        self.tool_window.setWindowTitle("ChimeraX KVFinder (Qt)")
         self.ui = Ui_pyKVFinder()
         self.ui.setupUi(self.tool_window)  
 
@@ -101,6 +104,7 @@ class KVFinder(ToolInstance):
         self.ui.tabs.addTab(self.ui.debug, "")
 
         self.ui.tabs.setTabText(self.ui.tabs.indexOf(self.ui.debug), _translate("pyKVFinder", "Debug"))
+        # self.tool_window.adjustSize()
         self.tool_window.show()
 
         # Set box centers
@@ -118,6 +122,7 @@ class KVFinder(ToolInstance):
 
         # Restore Default Parameters
         self.restore(is_startup=True)
+
 
 
     def _connect_ui(self):
@@ -139,7 +144,22 @@ class KVFinder(ToolInstance):
         # ui.button_exit.clicked.connect(tw.close)
         self.ui.button_restore.clicked.connect(self.restore)
         # ui.button_grid.clicked.connect(self.show_grid)
-        # ui.button_save_parameters.clicked.connect(self.save_parameters)
+        self.ui.button_save_parameters.clicked.connect(self.save_parameters)
+
+        # hook up Refresh buttons callback
+        self.ui.refresh_input.clicked.connect(lambda: self.refresh(self.ui.input))
+
+        # hook up resolution-step CheckBox callbacks
+        self.ui.resolution_label.clicked.connect(self.check_resolution)
+        self.ui.step_size_label.clicked.connect(self.check_step_size)
+
+        # Parts Button
+        # self.ui.regionOption_rbtn1.toggled.connect(self._optionCheck)
+        # self.ui.regionOption_rbtn2.toggled.connect(self._optionCheck)
+        # self.ui.regionOption_rbtn3.toggled.connect(self._optionCheck)
+        # self.ui.regionOption_rbtn4.toggled.connect(self._optionCheck)
+
+        self.ui.groupButton.buttonClicked.connect(self._optionCheck)
 
         # hook up Browse buttons callbacks
         # ui.button_browse.clicked.connect(self.select_directory)
@@ -148,22 +168,29 @@ class KVFinder(ToolInstance):
         #         "Choose parKVFinder executable", self.parKVFinder, "*"
         #     )
         # )
-        # ui.button_browse3.clicked.connect(
-        #     lambda: self.select_file(
-        #         "Choose van der Waals radii dictionary", self.dictionary, "*"
-        #     )
-        # )
-        # ui.button_browse4.clicked.connect(
-        #     lambda: self.select_file(
-        #         "Choose KVFinder Results File",
-        #         self.results_file_entry,
-        #         "KVFinder Results File (*.toml);;All files (*)",
-        #     )
-        # )
+        self.ui.button_browse3.clicked.connect(
+            lambda: self.select_file(
+                "Choose van der Waals radii dictionary", self.ui.dictionary, "*"
+            )
+        )
+        self.ui.button_browse4.clicked.connect(
+            lambda: self.select_file(
+                "Choose KVFinder Results File",
+                self.ui.results_file_entry,
+                "KVFinder Results File (*.toml);;All files (*)",
+            )
+        )
 
 
 
         self.ui.button_exit.clicked.connect(self.tool_window.close)
+    
+    def _optionCheck(self, sender):
+        rb = self.sender()
+
+        if rb.isChecked():
+            self.session.logger.info(f'You selected {rb.text()}')
+            self.region_option = rb.text()
 
     def restore(self, is_startup=False) -> None:
         """
@@ -221,7 +248,7 @@ class KVFinder(ToolInstance):
         self.ui.surface.setCurrentText(self._default.surface)
         self.ui.cavity_representation.setCurrentText(self._default.cavity_representation)
         self.ui.output_dir_path.setText(self._default.output_dir_path)
-        self.ui.parKVFinder.setText(self._default.parKVFinder)
+        # self.ui.parKVFinder.setText(self._default.parKVFinder)
         self.ui.dictionary.setText(self._default.dictionary)
 
         ### Search Space Tab ###
@@ -266,9 +293,10 @@ class KVFinder(ToolInstance):
     
     def run(self) -> None:
         import time
-
+        self.ui.region
         atomic = self.extract_pdb_session()
         pass
+    
 
     def save_parameters(self) -> None:
 
@@ -285,7 +313,7 @@ class KVFinder(ToolInstance):
         # Save input pdb
         if self.ui.input.currentText() != "":
             for x in all_atomic_structures(self.session).names:
-                if x == self.input.currentText():
+                if x == self.ui.input.currentText():
                     pdb = os.path.join(
                         os.path.join(basedir, f"{self.input.currentText()}.pdb")
                     )
@@ -307,7 +335,6 @@ class KVFinder(ToolInstance):
         else:
             sel_atoms = all_atoms(self.session)
 
-
         self.cprint(f"Info: Selected Atoms {len(sel_atoms)}")
 
         atomNP = np.zeros(shape=(len(sel_atoms), 8), dtype='<U32')
@@ -327,7 +354,35 @@ class KVFinder(ToolInstance):
             except:
                 self.cprint(f"Problem to modify line {str(i)}: {str(atom)}")
 
-        return atomNP           
+        return atomNP       
+
+    def check_resolution(self):
+        if self.ui.resolution_label.isChecked():
+            self.ui.resolution.setEnabled(True)
+            self.ui.resolution.setCurrentText(self._default.resolution)
+            self.ui.step_size_label.setChecked(False)
+            self.ui.step_size.setEnabled(False)
+            self.ui.step_size.setValue(self._default.step)
+        else:
+            self.ui.resolution.setEnabled(False)
+            self.ui.resolution.setCurrentText("Off")
+            self.ui.step_size_label.setChecked(True)
+            self.ui.step_size.setEnabled(True)
+            self.ui.step_size.setValue(0.6)
+
+    def check_step_size(self):
+        if self.ui.step_size_label.isChecked():
+            self.ui.resolution_label.setChecked(False)
+            self.ui.resolution.setEnabled(False)
+            self.ui.resolution.setCurrentText("Off")
+            self.ui.step_size.setEnabled(True)
+            self.ui.step_size.setValue(0.6)
+        else:
+            self.ui.resolution_label.setChecked(True)
+            self.ui.resolution.setEnabled(True)
+            self.ui.resolution.setCurrentText(self._default.resolution)
+            self.ui.step_size.setEnabled(False)
+            self.ui.step_size.setValue(self._default.step)    
 
 
     def fill_context_menu(self, menu, x, y):
@@ -393,7 +448,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.button_run.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.button_run)
+        sizePolicy = self._setPolicy(self.button_run)
 
         self.button_run.setSizePolicy(sizePolicy)
         self.button_run.setText("Run pyKVFinder")
@@ -406,7 +461,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.button_grid.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.button_grid)
+        sizePolicy = self._setPolicy(self.button_grid)
 
         self.button_grid.setSizePolicy(sizePolicy)
         self.button_grid.setObjectName("button_grid")
@@ -418,7 +473,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.button_save_parameters.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.button_save_parameters)
+        sizePolicy = self._setPolicy(self.button_save_parameters)
 
         self.button_save_parameters.setSizePolicy(sizePolicy)
         self.button_save_parameters.setText("Save Parameters")
@@ -431,7 +486,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.button_restore.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.button_restore)
+        sizePolicy = self._setPolicy(self.button_restore)
 
         self.button_restore.setSizePolicy(sizePolicy)
         self.button_restore.setObjectName("button_restore")
@@ -443,7 +498,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.button_exit.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.button_exit)
+        sizePolicy = self._setPolicy(self.button_exit)
 
         self.button_exit.setSizePolicy(sizePolicy)
         self.button_exit.setText("Exit")
@@ -457,7 +512,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.tabs.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.tabs)
+        sizePolicy = self._setPolicy(self.tabs)
 
         self.tabs.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -472,106 +527,180 @@ class Ui_pyKVFinder(object):
         self.main.setObjectName("main")
         self.verticalLayout_8 = QtWidgets.QVBoxLayout(self.main)
         self.verticalLayout_8.setObjectName("verticalLayout_8")
+
         self.parameters = QtWidgets.QGroupBox(self.main)
-
-        #sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-        #sizePolicy.setHorizontalStretch(0)
-        #sizePolicy.setVerticalStretch(0)
-        #sizePolicy.setHeightForWidth(self.parameters.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.parameters)
-
+        sizePolicy = self._setPolicy(self.parameters)
         self.parameters.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.parameters.setFont(font)
         self.parameters.setObjectName("parameters")
+
         self.verticalLayout = QtWidgets.QVBoxLayout(self.parameters)
         self.verticalLayout.setSpacing(3)
         self.verticalLayout.setObjectName("verticalLayout")
+
         self.hframe1 = QtWidgets.QFrame(self.parameters)
         self.hframe1.setObjectName("hframe1")
+
         self.horizontalLayout_14 = QtWidgets.QHBoxLayout(self.hframe1)
         self.horizontalLayout_14.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_14.setObjectName("horizontalLayout_14")
+
         self.input_label = QtWidgets.QLabel(self.hframe1)
-        
-        #sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        #sizePolicy.setHorizontalStretch(0)
-        #sizePolicy.setVerticalStretch(0)
-        #sizePolicy.setHeightForWidth(self.input_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.input_label)
-
+        sizePolicy = self._setPolicy(self.input_label)
         self.input_label.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+        
         self.input_label.setFont(font)
         self.input_label.setMouseTracking(False)
         self.input_label.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.input_label.setTextFormat(QtCore.Qt.PlainText)
         self.input_label.setObjectName("input_label")
+
         self.horizontalLayout_14.addWidget(self.input_label)
+
         self.input = QtWidgets.QComboBox(self.hframe1)
-
-        #sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Fixed)
-        #sizePolicy.setHorizontalStretch(0)
-        #sizePolicy.setVerticalStretch(0)
-        #sizePolicy.setHeightForWidth(self.input.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.input)
-
+        sizePolicy = self._setPolicy(self.input)
         self.input.setSizePolicy(sizePolicy)
         self.input.setObjectName("input")
+
         self.horizontalLayout_14.addWidget(self.input)
+
         self.refresh_input = QtWidgets.QPushButton(self.hframe1)
-
-        #sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        #sizePolicy.setHorizontalStretch(0)
-        #sizePolicy.setVerticalStretch(0)
-        #sizePolicy.setHeightForWidth(self.refresh_input.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.refresh_input)
-
+        sizePolicy = self._setPolicy(self.refresh_input)
         self.refresh_input.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.refresh_input.setFont(font)
         self.refresh_input.setObjectName("refresh_input")
+
         self.horizontalLayout_14.addWidget(self.refresh_input)
         spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.horizontalLayout_14.addItem(spacerItem)
+
         self.verticalLayout.addWidget(self.hframe1)
+
+        self.hframe1_5 = QtWidgets.QHBoxLayout()
+        self.hframe1_5.setObjectName("hframe1_5")
+
+        self.regionOption_frame = QtWidgets.QFrame(self.parameters)
+        self.regionOption_frame.setObjectName("regionoption_frame")
+
+        # self.regionOption_box = QtWidgets.QGroupBox("Parts of structure")
+        # self.regionOption_box.setMinimumHeight(QtWidgets.QRadioButton().sizeHint().height()*4)
+        
+
+        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+        # sizePolicy.setHorizontalStretch(0)
+        # sizePolicy.setVerticalStretch(5)
+        # sizePolicy.setHeightForWidth(self.regionOption_box.sizePolicy().hasHeightForWidth())
+        # sizePolicy = self._setPolicy(self.regionOption_box)
+        # self.regionOption_box.setSizePolicy(sizePolicy)
+
+        self.hL_Option = QtWidgets.QHBoxLayout(self.regionOption_frame)  
+        self.hL_Option.setSizeConstraint(QtWidgets.QLayout.SetDefaultConstraint)
+        self.hL_Option.setObjectName("hL_Option")
+        
+    
+        self.regionOption_label = QtWidgets.QLabel("Structure: ")
+        sizePolicy = self._setPolicy(self.regionOption_label)
+        self.regionOption_label.setSizePolicy(sizePolicy)      
+
+        font = QtGui.QFont()
+        font.setPointSize(10)
+        font.setBold(False)
+        font.setItalic(False)
+        font.setWeight(50)
+        font.setKerning(True)
+        
+        self.regionOption_label.setFont(font)
+        self.regionOption_label.setMouseTracking(False)
+        self.regionOption_label.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.regionOption_label.setTextFormat(QtCore.Qt.PlainText)
+        self.regionOption_label.setObjectName("regionOption_label")
+
+        
+
+
+        self.hL_Option.addWidget(self.regionOption_label)
+
+        self.regionOption_rbtn1 = QtWidgets.QRadioButton("Default")
+        self.regionOption_rbtn1.setChecked(True)
+        self.regionOption_rbtn1.setAutoExclusive(True)
+        self.regionOption_rbtn2  = QtWidgets.QRadioButton("Selected")
+        self.regionOption_rbtn3 = QtWidgets.QRadioButton("Protein")
+        self.regionOption_rbtn4  = QtWidgets.QRadioButton("All ligands without HOH")
+
+        self.groupButton = QtWidgets.QButtonGroup(self.regionOption_frame)
+
+        self.groupButton.addButton(self.regionOption_rbtn1)
+        self.groupButton.addButton(self.regionOption_rbtn2)
+        self.groupButton.addButton(self.regionOption_rbtn3)
+        self.groupButton.addButton(self.regionOption_rbtn4)
+        
+        self.buttonLayout.addLayout(self.regionOption_rbtn1)
+
+        self.buttonLayout.addWidget(self.regionOption_rbtn1)
+        self.buttonLayout.addWidget(self.regionOption_rbtn2)
+        self.buttonLayout.addWidget(self.regionOption_rbtn3)
+        self.buttonLayout.addWidget(self.regionOption_rbtn4)
+
+        self.hL_Option.addWidget(self.buttonLayout)
+
+        self.hL_Option.addStretch(1)
+
+        # self.hL_Option.addWidget(self.regionOption_label
+
+        # self.regionOption_box.setLayout(self.hL_Option)
+
+        self.hframe1_5.addWidget(self.regionOption_frame)
+
+        self.verticalLayout.addLayout(self.hframe1_5)
+
         self.hframe2 = QtWidgets.QHBoxLayout()
         self.hframe2.setObjectName("hframe2")
+
         self.resolution_frame = QtWidgets.QFrame(self.parameters)
         self.resolution_frame.setObjectName("resolution_frame")
+
         self.horizontalLayout_21 = QtWidgets.QHBoxLayout(self.resolution_frame)
         self.horizontalLayout_21.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_21.setObjectName("horizontalLayout_21")
+
         self.resolution_label = QtWidgets.QCheckBox(self.resolution_frame)
         self.resolution_label.setChecked(True)
         self.resolution_label.setObjectName("resolution_label")
+
         self.horizontalLayout_21.addWidget(self.resolution_label)
+
         self.resolution = QtWidgets.QComboBox(self.resolution_frame)
         self.resolution.setObjectName("resolution")
         self.resolution.addItem("")
         self.resolution.addItem("")
         self.resolution.addItem("")
         self.resolution.addItem("")
+
         self.horizontalLayout_21.addWidget(self.resolution)
+
         self.hframe2.addWidget(self.resolution_frame)
         self.step_size_frame = QtWidgets.QFrame(self.parameters)
         self.step_size_frame.setObjectName("step_size_frame")
@@ -583,12 +712,7 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_20.addWidget(self.step_size_label)
         self.step_size = QtWidgets.QDoubleSpinBox(self.step_size_frame)
 
-        #sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        #sizePolicy.setHorizontalStretch(0)
-        #sizePolicy.setVerticalStretch(0)
-        #sizePolicy.setHeightForWidth(self.step_size.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.step_size)
+        sizePolicy = self._setPolicy(self.step_size)
 
         self.step_size.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -623,7 +747,7 @@ class Ui_pyKVFinder(object):
         #sizePolicy.setVerticalStretch(0)
         #sizePolicy.setHeightForWidth(self.probe_in_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.probe_in_label)
+        sizePolicy = self._setPolicy(self.probe_in_label)
 
         self.probe_in_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -645,7 +769,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.probe_in.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.probe_in)
+        sizePolicy = self._setPolicy(self.probe_in)
 
         self.probe_in.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -674,7 +798,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.probe_out_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.probe_out_label)
+        sizePolicy = self._setPolicy(self.probe_out_label)
 
         self.probe_out_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -696,7 +820,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.probe_out.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.probe_out)
+        sizePolicy = self._setPolicy(self.probe_out)
 
         self.probe_out.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -730,7 +854,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.removal_distance_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.removal_distance_label)
+        sizePolicy = self._setPolicy(self.removal_distance_label)
 
         self.removal_distance_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -752,7 +876,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.removal_distance.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.removal_distance)
+        sizePolicy = self._setPolicy(self.removal_distance)
 
         self.removal_distance.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -782,7 +906,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.volume_cutoff_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.volume_cutoff_label)
+        sizePolicy = self._setPolicy(self.volume_cutoff_label)
 
         self.volume_cutoff_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -804,7 +928,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.volume_cutoff.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.volume_cutoff)
+        sizePolicy = self._setPolicy(self.volume_cutoff)
 
         self.volume_cutoff.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -838,7 +962,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.surface_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.surface_label)
+        sizePolicy = self._setPolicy(self.surface_label)
 
         self.surface_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -871,7 +995,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.cavity_representation_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.cavity_representation_label)
+        sizePolicy = self._setPolicy(self.cavity_representation_label)
 
         self.cavity_representation_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -907,7 +1031,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.output_base_name_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.output_base_name_label)
+        sizePolicy = self._setPolicy(self.output_base_name_label)
 
         self.output_base_name_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -943,22 +1067,18 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_12 = QtWidgets.QHBoxLayout(self.hframe7_2)
         self.horizontalLayout_12.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_12.setObjectName("horizontalLayout_12")
+
         self.output_dir_label = QtWidgets.QLabel(self.hframe7_2)
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.output_dir_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.output_dir_label)
-
+        sizePolicy = self._setPolicy(self.output_dir_label)
         self.output_dir_label.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.output_dir_label.setFont(font)
         self.output_dir_label.setMouseTracking(False)
         self.output_dir_label.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -966,103 +1086,66 @@ class Ui_pyKVFinder(object):
         self.output_dir_label.setObjectName("output_dir_label")
         self.horizontalLayout_12.addWidget(self.output_dir_label)
         self.output_dir_path = QtWidgets.QLineEdit(self.hframe7_2)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.output_dir_path.setFont(font)
         self.output_dir_path.setText("")
         self.output_dir_path.setEchoMode(QtWidgets.QLineEdit.Normal)
         self.output_dir_path.setReadOnly(True)
         self.output_dir_path.setClearButtonEnabled(False)
         self.output_dir_path.setObjectName("output_dir_path")
+
         self.horizontalLayout_12.addWidget(self.output_dir_path)
         self.button_browse = QtWidgets.QPushButton(self.hframe7_2)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.button_browse.setFont(font)
         self.button_browse.setText("Browse...")
         self.button_browse.setObjectName("button_browse")
+
         self.horizontalLayout_12.addWidget(self.button_browse)
+
         self.verticalLayout.addWidget(self.hframe7_2)
         self.verticalLayout_8.addWidget(self.parameters)
+
         self.file_locations = QtWidgets.QGroupBox(self.main)
         self.file_locations.setObjectName("file_locations")
+
         self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.file_locations)
         self.verticalLayout_3.setSpacing(3)
         self.verticalLayout_3.setObjectName("verticalLayout_3")
+
         self.hframe5_2 = QtWidgets.QFrame(self.file_locations)
         self.hframe5_2.setObjectName("hframe5_2")
+
         self.horizontalLayout_24 = QtWidgets.QHBoxLayout(self.hframe5_2)
         self.horizontalLayout_24.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_24.setObjectName("horizontalLayout_24")
-        self.parKVFinder_label = QtWidgets.QLabel(self.hframe5_2)
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.parKVFinder_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.parKVFinder_label)
-
-        self.parKVFinder_label.setSizePolicy(sizePolicy)
-        font = QtGui.QFont()
-        font.setPointSize(10)
-        font.setBold(False)
-        font.setItalic(False)
-        font.setWeight(50)
-        font.setKerning(True)
-        self.parKVFinder_label.setFont(font)
-        self.parKVFinder_label.setMouseTracking(False)
-        self.parKVFinder_label.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.parKVFinder_label.setTextFormat(QtCore.Qt.PlainText)
-        self.parKVFinder_label.setObjectName("parKVFinder_label")
-        self.horizontalLayout_24.addWidget(self.parKVFinder_label)
-        self.parKVFinder = QtWidgets.QLineEdit(self.hframe5_2)
-        font = QtGui.QFont()
-        font.setPointSize(10)
-        font.setBold(False)
-        font.setItalic(False)
-        font.setWeight(50)
-        font.setKerning(True)
-        self.parKVFinder.setFont(font)
-        self.parKVFinder.setText("")
-        self.parKVFinder.setEchoMode(QtWidgets.QLineEdit.Normal)
-        self.parKVFinder.setReadOnly(True)
-        self.parKVFinder.setClearButtonEnabled(False)
-        self.parKVFinder.setObjectName("parKVFinder")
-        self.horizontalLayout_24.addWidget(self.parKVFinder)
-        self.button_browse2 = QtWidgets.QPushButton(self.hframe5_2)
-        font = QtGui.QFont()
-        font.setPointSize(10)
-        font.setBold(False)
-        font.setItalic(False)
-        font.setWeight(50)
-        font.setKerning(True)
-        self.button_browse2.setFont(font)
-        self.button_browse2.setText("Browse...")
-        self.button_browse2.setObjectName("button_browse2")
-        self.horizontalLayout_24.addWidget(self.button_browse2)
+        
         self.verticalLayout_3.addWidget(self.hframe5_2)
+
         self.hframe5_3 = QtWidgets.QFrame(self.file_locations)
         self.hframe5_3.setObjectName("hframe5_3")
+
         self.horizontalLayout_25 = QtWidgets.QHBoxLayout(self.hframe5_3)
         self.horizontalLayout_25.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_25.setObjectName("horizontalLayout_25")
+
         self.dictionary_label = QtWidgets.QLabel(self.hframe5_3)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.dictionary_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.dictionary_label)
+        sizePolicy = self._setPolicy(self.dictionary_label)
 
         self.dictionary_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -1211,12 +1294,7 @@ class Ui_pyKVFinder(object):
         self.box_adjustment_label = QtWidgets.QLabel(self.box_adjustment)
         self.box_adjustment_label.setEnabled(True)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.box_adjustment_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.box_adjustment_label)
+        sizePolicy = self._setPolicy(self.box_adjustment_label)
 
         self.box_adjustment_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -1343,7 +1421,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.ligand_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.ligand_label)
+        sizePolicy = self._setPolicy(self.ligand_label)
 
         self.ligand_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -1404,12 +1482,7 @@ class Ui_pyKVFinder(object):
         self.ligand_cutoff = QtWidgets.QDoubleSpinBox(self.hframe18)
         self.ligand_cutoff.setEnabled(True)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.ligand_cutoff.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.ligand_cutoff)
+        sizePolicy = self._setPolicy(self.ligand_cutoff)
 
         self.ligand_cutoff.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
@@ -1440,24 +1513,14 @@ class Ui_pyKVFinder(object):
         self.show_descriptors.setObjectName("show_descriptors")
         self.show_descriptors_label = QtWidgets.QLabel(self.results)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Preferred)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.show_descriptors_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.show_descriptors_label)
+        sizePolicy = self._setPolicy(self.show_descriptors_label)
 
         self.show_descriptors_label.setSizePolicy(sizePolicy)
         self.show_descriptors_label.setObjectName("show_descriptors_label")
         self.show_descriptors.addWidget(self.show_descriptors_label)
         self.default_view = QtWidgets.QRadioButton(self.results)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.default_view.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.default_view)
+        sizePolicy = self._setPolicy(self.default_view)
 
         self.default_view.setSizePolicy(sizePolicy)
         self.default_view.setChecked(True)
@@ -1466,25 +1529,15 @@ class Ui_pyKVFinder(object):
         self.show_descriptors.addWidget(self.default_view)
         self.depth_view = QtWidgets.QRadioButton(self.results)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.depth_view.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.depth_view)
+        sizePolicy = self._setPolicy(self.depth_view)
 
         self.depth_view.setSizePolicy(sizePolicy)
         self.depth_view.setAcceptDrops(False)
         self.depth_view.setObjectName("depth_view")
         self.show_descriptors.addWidget(self.depth_view)
         self.hydropathy_view = QtWidgets.QRadioButton(self.results)
-        
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.hydropathy_view.sizePolicy().hasHeightForWidth())
-       
-        sizePolicy = self.setPolice(self.hydropathy_view)
+           
+        sizePolicy = self._setPolicy(self.hydropathy_view)
 
         self.hydropathy_view.setSizePolicy(sizePolicy)
         self.hydropathy_view.setObjectName("hydropathy_view")
@@ -1500,12 +1553,7 @@ class Ui_pyKVFinder(object):
         self.hframe26.setObjectName("hframe26")
         self.results_file_label = QtWidgets.QLabel(self.results_information)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Preferred)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.results_file_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.results_file_label)
+        sizePolicy = self._setPolicy(self.results_file_label)
 
         self.results_file_label.setSizePolicy(sizePolicy)
         self.results_file_label.setObjectName("results_file_label")
@@ -1574,12 +1622,7 @@ class Ui_pyKVFinder(object):
         self.hframe30.addWidget(self.step_size_label_2)
         self.step_size_entry = QtWidgets.QLineEdit(self.results_information)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.step_size_entry.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.step_size_entry)
+        sizePolicy = self._setPolicy(self.step_size_entry)
 
         self.step_size_entry.setSizePolicy(sizePolicy)
         self.step_size_entry.setMaximumSize(QtCore.QSize(50, 16777215))
@@ -1595,12 +1638,7 @@ class Ui_pyKVFinder(object):
         self.gridLayout_5.addWidget(self.results_information, 0, 0, 1, 1)
         self.descriptors = QtWidgets.QGroupBox(self.results)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.descriptors.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.descriptors)
+        sizePolicy = self._setPolicy(self.descriptors)
 
         self.descriptors.setSizePolicy(sizePolicy)
         self.descriptors.setObjectName("descriptors")
@@ -1610,12 +1648,7 @@ class Ui_pyKVFinder(object):
         self.vframe1.setObjectName("vframe1")
         self.volume_label = QtWidgets.QLabel(self.descriptors)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.volume_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.volume_label)
+        sizePolicy = self._setPolicy(self.volume_label)
 
         self.volume_label.setSizePolicy(sizePolicy)
         self.volume_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1623,12 +1656,7 @@ class Ui_pyKVFinder(object):
         self.vframe1.addWidget(self.volume_label)
         self.volume_list = QtWidgets.QListWidget(self.descriptors)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.volume_list.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.volume_list)
+        sizePolicy = self._setPolicy(self.volume_list)
 
         self.volume_list.setSizePolicy(sizePolicy)
         self.volume_list.setMinimumSize(QtCore.QSize(153, 0))
@@ -1640,12 +1668,7 @@ class Ui_pyKVFinder(object):
         self.vframe2.setObjectName("vframe2")
         self.area_label = QtWidgets.QLabel(self.descriptors)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.area_label.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.area_label)
+        sizePolicy = self._setPolicy(self.area_label)
 
         self.area_label.setSizePolicy(sizePolicy)
         self.area_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1653,12 +1676,7 @@ class Ui_pyKVFinder(object):
         self.vframe2.addWidget(self.area_label)
         self.area_list = QtWidgets.QListWidget(self.descriptors)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.area_list.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.area_list)
+        sizePolicy = self._setPolicy(self.area_list)
 
         self.area_list.setSizePolicy(sizePolicy)
         self.area_list.setMinimumSize(QtCore.QSize(153, 0))
@@ -1674,12 +1692,7 @@ class Ui_pyKVFinder(object):
         self.vframe4.addWidget(self.avg_depth_label)
         self.avg_depth_list = QtWidgets.QListWidget(self.descriptors)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.avg_depth_list.sizePolicy().hasHeightForWidth())
-
-        sizePolicy = self.setPolice(self.avg_depth_list)
+        sizePolicy = self._setPolicy(self.avg_depth_list)
 
         self.avg_depth_list.setSizePolicy(sizePolicy)
         self.avg_depth_list.setMinimumSize(QtCore.QSize(153, 0))
@@ -1700,7 +1713,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.max_depth_list.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.max_depth_list)
+        sizePolicy = self._setPolicy(self.max_depth_list)
 
         self.max_depth_list.setSizePolicy(sizePolicy)
         self.max_depth_list.setMinimumSize(QtCore.QSize(153, 0))
@@ -1721,7 +1734,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.avg_hydropathy_list.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.avg_hydropathy_list)
+        sizePolicy = self._setPolicy(self.avg_hydropathy_list)
 
         self.avg_hydropathy_list.setSizePolicy(sizePolicy)
         self.avg_hydropathy_list.setMinimumSize(QtCore.QSize(153, 0))
@@ -1738,7 +1751,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.residues_label.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.residues_label)
+        sizePolicy = self._setPolicy(self.residues_label)
 
         self.residues_label.setSizePolicy(sizePolicy)
         self.residues_label.setAlignment(QtCore.Qt.AlignCenter)
@@ -1751,7 +1764,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.residues_list.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.residues_list)
+        sizePolicy = self._setPolicy(self.residues_list)
 
         self.residues_list.setSizePolicy(sizePolicy)
         self.residues_list.setMinimumSize(QtCore.QSize(153, 0))
@@ -1761,13 +1774,6 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout.addLayout(self.vframe3)
         self.gridLayout_5.addWidget(self.descriptors, 2, 0, 1, 1)
         self.tabs.addTab(self.results, "")
-
-
-        # self.debug = SampleGUI(self.session)
-        # self.debug.setObjectName("debug")
-        
-        # self.tabs.addTab(self.debug, "")
-
 
         self.about = QtWidgets.QWidget()
         self.about.setObjectName("about")
@@ -1795,7 +1801,7 @@ class Ui_pyKVFinder(object):
         # sizePolicy.setVerticalStretch(0)
         # sizePolicy.setHeightForWidth(self.main_description.sizePolicy().hasHeightForWidth())
 
-        sizePolicy = self.setPolice(self.main_description)
+        sizePolicy = self._setPolicy(self.main_description)
 
         self.main_description.setSizePolicy(sizePolicy)
         self.main_description.setMinimumSize(QtCore.QSize(0, 0))
@@ -1822,13 +1828,19 @@ class Ui_pyKVFinder(object):
         self.retranslateUi(pyKVFinder)
         self.tabs.setCurrentIndex(0)
         QtCore.QMetaObject.connectSlotsByName(pyKVFinder)
+
         pyKVFinder.setTabOrder(self.tabs, self.button_run)
         pyKVFinder.setTabOrder(self.button_run, self.button_grid)
         pyKVFinder.setTabOrder(self.button_grid, self.button_restore)
         pyKVFinder.setTabOrder(self.button_restore, self.button_exit)
         pyKVFinder.setTabOrder(self.button_exit, self.input)
         pyKVFinder.setTabOrder(self.input, self.refresh_input)
-        pyKVFinder.setTabOrder(self.refresh_input, self.probe_out)
+        pyKVFinder.setTabOrder(self.refresh_input, self.regionOption_rbtn4)
+        pyKVFinder.setTabOrder(self.regionOption_rbtn4, self.regionOption_rbtn3)
+        pyKVFinder.setTabOrder(self.regionOption_rbtn3, self.regionOption_rbtn2)
+        pyKVFinder.setTabOrder(self.regionOption_rbtn2, self.regionOption_rbtn1)
+        pyKVFinder.setTabOrder(self.regionOption_rbtn1, self.regionOption_label)
+        pyKVFinder.setTabOrder(self.regionOption_label, self.probe_out)
         pyKVFinder.setTabOrder(self.probe_out, self.probe_in)
         pyKVFinder.setTabOrder(self.probe_in, self.volume_cutoff)
         pyKVFinder.setTabOrder(self.volume_cutoff, self.removal_distance)
@@ -1860,7 +1872,8 @@ class Ui_pyKVFinder(object):
         pyKVFinder.setTabOrder(self.area_list, self.residues_list)
         pyKVFinder.setTabOrder(self.residues_list, self.about_text)
 
-    def setPolice(self, element):
+        self.gui.adjustSize()
+    def _setPolicy(self, element):
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
         sizePolicy.setHorizontalStretch(0)
         sizePolicy.setVerticalStretch(0)
@@ -1893,7 +1906,7 @@ class Ui_pyKVFinder(object):
         self.output_base_name_label.setText(_translate("pyKVFinder", "Output Base Name:"))
         self.output_dir_label.setText(_translate("pyKVFinder", "Output Directory:"))
         self.file_locations.setTitle(_translate("pyKVFinder", "File Locations"))
-        self.parKVFinder_label.setText(_translate("pyKVFinder", "parKVFinder:"))
+        #self.parKVFinder_label.setText(_translate("pyKVFinder", "parKVFinder:"))
         self.dictionary_label.setText(_translate("pyKVFinder", "vdW dictionary:"))
         self.tabs.setTabText(self.tabs.indexOf(self.main), _translate("pyKVFinder", "Main"))
         self.box_adjustment.setTitle(_translate("pyKVFinder", "Box Adjustment"))

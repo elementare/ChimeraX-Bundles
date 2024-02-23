@@ -4,5 +4,6 @@ ChimeraX_KVFinderQt.egg-info/dependency_links.txt
 ChimeraX_KVFinderQt.egg-info/requires.txt
 ChimeraX_KVFinderQt.egg-info/top_level.txt
 src/ChimeraX-pyKVFinder-Tools.ui
+src/ChimeraX-pyKVFinder-Tools_ui.py
 src/__init__.py
 src/kvfinder.py

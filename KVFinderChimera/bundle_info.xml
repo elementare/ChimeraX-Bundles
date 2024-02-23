@@ -24,7 +24,9 @@ will be displayed without the ChimeraX- prefix.
   <Categories>
     <Category name="Structure Analysis"/>
   </Categories>
-
+  <DataFiles>
+    <DataFile>ChimeraX-pyKVFinder-Tools.ui</DataFile>
+  </DataFiles>
   <!-- Dependencies on other ChimeraX/Python packages -->
   <!-- This example uses functionality from the Tutorial_Command bundle -->
   <Dependencies>
@@ -32,8 +34,8 @@ will be displayed without the ChimeraX- prefix.
     <Dependency name="ChimeraX-UI" version="~=1.0"/>
     <Dependency name="ChimeraX-Atomic" version="~=1.0"/>
     <Dependency name="ChimeraX-DataFormats" version="~=1.0"/>
-    <Dependency name="ChimeraX-Commands" version="~=1.0"/>
     <Dependency name="pyKVFinder" version="~=0.6.12"/>
+    <Dependency name="PyQt5" version="~=5.15.10"/>
   </Dependencies>
 
 

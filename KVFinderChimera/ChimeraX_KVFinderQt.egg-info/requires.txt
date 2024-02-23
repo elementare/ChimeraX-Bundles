@@ -2,5 +2,5 @@ ChimeraX-Core~=1.1
 ChimeraX-UI~=1.0
 ChimeraX-Atomic~=1.0
 ChimeraX-DataFormats~=1.0
-ChimeraX-Commands~=1.0
 pyKVFinder~=0.6.12
+PyQt5~=5.15.10

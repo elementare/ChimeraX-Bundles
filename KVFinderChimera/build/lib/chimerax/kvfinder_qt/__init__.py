@@ -11,14 +11,6 @@ class _MyAPI(BundleAPI):
                         # ToolInfo instance (vs. BundleInfo and
                         # tool name when api_version==0 [the default])
 
-    """
-
-    @staticmethod
-    def initialize(session, bundle_info):
-        \"\"\"Register file formats, commands, and database fetch.\"\"\"
-        from . import kvfinder_selector
-        kvfinder_selector._register_atoms_selectors(session.logger)
-    """
     # Override method
     @staticmethod
     def start_tool(session, bi, ti):

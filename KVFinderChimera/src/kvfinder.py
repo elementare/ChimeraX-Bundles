@@ -267,7 +267,7 @@ class KVFinder(ToolInstance):
     def run(self) -> None:
         import time
 
-        atomic =
+        atomic = self.extract_pdb_session()
         pass
 
     def save_parameters(self) -> None:

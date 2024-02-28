@@ -11,8 +11,9 @@
 # or derivations thereof.
 # === UCSF ChimeraX Copyright ===
 
+from chimerax.core.objects import all_objects
 from chimerax.core.tools import ToolInstance
-from chimerax.atomic import StructureSeq, Structure, selected_atoms, all_atoms, all_atomic_structures
+from chimerax.atomic import StructureSeq, Structure, selected_atoms, all_atoms, structure_atoms, all_atomic_structures
 from chimerax.core.commands import run
 from os.path import expanduser
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -23,6 +24,7 @@ import os
 import pyKVFinder
 import numpy as np
 import sys
+import toml
 
 dialog = None
 
@@ -32,16 +34,19 @@ class _Default(object):
         #######################
         ### Main Parameters ###
         #######################
-        self.step = 0.0
+        self.step = 0.6
         self.resolution = "Low"
         self.probe_in = 1.4
         self.probe_out = 4.0
         self.removal_distance = 2.4
         self.volume_cutoff = 5.0
-        self.surface = "Molecular Surface (VdW)"
-        self.cavity_representation = "Filtered"
+        self.surface = "Solvent Excluded Surface (SES)"
+        # self.cavity_representation = "Filtered"
         self.base_name = "output"
-        self.output_dir_path = expanduser('~/KVFinderResults')
+        if os.name == "posix":
+            self.output_dir_path = expanduser('~/')
+        else:
+            self.output_dir_path = expanduser('~\\')
         self.region_option = "Default"
         #######################
         ### File Locations  ###
@@ -150,8 +155,7 @@ class KVFinder(ToolInstance):
         self.ui.refresh_input.clicked.connect(lambda: self.refresh(self.ui.input))
 
         # hook up resolution-step CheckBox callbacks
-        self.ui.resolution_label.clicked.connect(self.check_resolution)
-        self.ui.step_size_label.clicked.connect(self.check_step_size)
+        # self.ui.resolution_label.clicked.connect(self.check_resolution)
 
         # Parts Button
         # self.ui.regionOption_rbtn1.toggled.connect(self._optionCheck)
@@ -162,17 +166,14 @@ class KVFinder(ToolInstance):
         self.ui.groupButton.buttonClicked.connect(self._optionCheck)
 
         # hook up Browse buttons callbacks
-        # ui.button_browse.clicked.connect(self.select_directory)
-        # ui.button_browse2.clicked.connect(
-        #     lambda: self.select_file(
-        #         "Choose parKVFinder executable", self.parKVFinder, "*"
-        #     )
-        # )
+        self.ui.button_browse.clicked.connect(self.select_directory)
+
         self.ui.button_browse3.clicked.connect(
             lambda: self.select_file(
                 "Choose van der Waals radii dictionary", self.ui.dictionary, "*"
             )
         )
+
         self.ui.button_browse4.clicked.connect(
             lambda: self.select_file(
                 "Choose KVFinder Results File",
@@ -181,16 +182,15 @@ class KVFinder(ToolInstance):
             )
         )
 
-
-
+        self.ui.button_box_adjustment_help.clicked.connect(self.box_adjustment_help)
         self.ui.button_exit.clicked.connect(self.tool_window.close)
+        self.ui.button_load_results.clicked.connect(self.load_results)
     
-    def _optionCheck(self, sender):
-        rb = self.sender()
+    def _optionCheck(self, btn):
 
-        if rb.isChecked():
-            self.session.logger.info(f'You selected {rb.text()}')
-            self.region_option = rb.text()
+        if btn.isChecked():
+            # self.session.logger.info(f'You selected {btn.text()}')
+            self.region_option = btn.text()
 
     def restore(self, is_startup=False) -> None:
         """
@@ -234,19 +234,20 @@ class KVFinder(ToolInstance):
         #cmd.delete("grid")
 
         ### Main tab ###
-        self.ui.step_size_label.setChecked(False)
         self.ui.step_size.setValue(self._default.step)
-        self.ui.step_size.setEnabled(False)
-        self.ui.resolution_label.setChecked(True)
-        self.ui.resolution.setCurrentText(self._default.resolution)
-        self.ui.resolution.setEnabled(True)
+        self.ui.step_size.setEnabled(True)
+
+        # self.ui.resolution_label.setChecked(True)
+        # self.ui.resolution.setCurrentText(self._default.resolution)
+        # self.ui.resolution.setEnabled(True)
+
         self.ui.base_name.setText(self._default.base_name)
         self.ui.probe_in.setValue(self._default.probe_in)
         self.ui.probe_out.setValue(self._default.probe_out)
         self.ui.volume_cutoff.setValue(self._default.volume_cutoff)
         self.ui.removal_distance.setValue(self._default.removal_distance)
         self.ui.surface.setCurrentText(self._default.surface)
-        self.ui.cavity_representation.setCurrentText(self._default.cavity_representation)
+        # self.ui.cavity_representation.setCurrentText(self._default.cavity_representation)
         self.ui.output_dir_path.setText(self._default.output_dir_path)
         # self.ui.parKVFinder.setText(self._default.parKVFinder)
         self.ui.dictionary.setText(self._default.dictionary)
@@ -293,11 +294,181 @@ class KVFinder(ToolInstance):
     
     def run(self) -> None:
         import time
-        self.ui.region
-        atomic = self.extract_pdb_session()
-        pass
-    
 
+        if self.save_parameters():
+            if self.region_option == "Default":
+                atomic = self.extract_pdb_session(selected=False, name=self.ui.input.currentText())
+                print(
+                    f"\n[==> Running pyKVFinder for: {os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.input.currentText()}.pdb')}"
+                )
+                start = time.time()
+                probe_out = self.ui.probe_out.value()
+                probe_in = self.ui.probe_in.value()
+                removal_distance = self.ui.removal_distance.value()
+                volume_cutoff = self.ui.volume_cutoff.value()
+                step = self.ui.step_size.value()
+                print(step)
+                ignore_backbone = True if self.ui.ignore_backbone_checkbox.isChecked() else False
+                surface =  'SES' if self.ui.surface.currentText() == 'Solvent Excluded Surface (SES)' else 'SAS'
+
+                vertices = pyKVFinder.get_vertices(atomic, probe_out=probe_out, step=step)
+                ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
+                elapsed_time = time.time() - start
+                print(f"> Cavities detected: {ncavs}")
+                print(f"> Elapsed time: {elapsed_time:.2f} seconds")
+
+                            # Load successfull run
+                self.ui.results_file_entry.setText(
+                    f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+                )
+
+                if ncavs > 0:
+                    self.ui.tabs.setCurrentIndex(2)
+                    surface, volume, area, residues, scales, avg_hydropathy, depths, max_depth, avg_depth, frequencies = self.characterization(cavities=cavities, step=step, atomic=atomic, vertices=vertices, probe_in=probe_in, ignore_backbone=ignore_backbone)
+                    
+                    if os.path.exists(
+                        f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+                    ):
+                        os.remove(
+                            f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+                        )
+
+                    output_cavity = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'output_cavity_{self.ui.input.currentText()}')
+                    pyKVFinder.export(output_cavity, cavities, surface, vertices, step=step, B=depths, Q=scales)
+
+                    pdb = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{self.ui.input.currentText()}')
+
+                    output_results = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', 'results.toml')
+                    pyKVFinder.write_results(output_results, ligand=None, input=pdb, output=output_cavity, volume=volume, area=area, max_depth=max_depth, avg_depth=avg_depth, avg_hydropathy=avg_hydropathy, residues=residues, frequencies=frequencies, step=step)
+                    
+                    os.rename(
+                        output_results,
+                        f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+                    )
+
+
+                    
+                    self.load_results()
+                elif ncavs == 0:
+                    QtWidgets.QMessageBox.warning(self.tool_window, "Warning!", "No cavities found!")
+            else:
+
+                QtWidgets.QMessageBox.critical(
+                    self.tool_window, "Error!", "An error occurred during cavity detection!"
+                )
+                return False                   
+                
+                #ncavs = self.get_number_of_cavities()
+
+        else:
+            from PyQt5.QtWidgets import QMessageBox
+
+            QMessageBox.critical(
+                self.tool_window,
+                "Error",
+                "An error occurred while creating the parameters file! Check the parKVFinder parameters!",
+            )
+            return False
+
+    def load_results(self) -> None:
+
+        # Get results file
+        results_file = self.ui.results_file_entry.text()
+
+        # Check if results file exist
+        if os.path.exists(results_file) and results_file.endswith(".toml"):
+            print(f"> Loading results from: {self.ui.results_file_entry.text()}")
+        else:
+            from PyQt5.QtWidgets import QMessageBox
+
+            error_msg = QMessageBox.critical(
+                self.tool_window, "Error", "Results file cannot be opened! Check results file path."
+            )
+            return False
+
+        # Create global variable for results
+        global results
+
+        # Read results (Ubuntu/macOS)
+        results = toml.load(results_file)
+
+        if "FILES" in results.keys():
+            results["FILES_PATH"] = results.pop("FILES")
+        elif "FILES_PATH" in results.keys():
+            pass
+        else:
+            from PyQt5.QtWidgets import QMessageBox
+
+            error_msg = QMessageBox.critical(
+                self.tool_window,
+                "Error",
+                "Results file has incorrect format! Please check your file.",
+            )
+            return False
+
+        # # Clean results
+        self.clean_results()
+
+        # # Refresh information
+        self.refresh_information()
+
+        # # Refresh volume
+        self.refresh_volume()
+
+        # # Refresh area
+        self.refresh_area()
+
+        # # Refresh depth
+        self.refresh_avg_depth()
+        self.refresh_max_depth()
+        self.refresh_avg_hydropathy()
+
+        # # Refresh residues
+        self.refresh_residues()
+
+        # # Set default view in results
+        self.ui.default_view.setChecked(True)
+
+
+        # # Load files as PyMOL objects
+        # cmd.delete("cavities")
+        # cmd.delete("residues")
+        # cmd.frame(1)
+
+        # Load input
+        
+        if "INPUT" in results["FILES_PATH"].keys():
+            input_fn = results["FILES_PATH"]["INPUT"]
+            self.input_pdb = os.path.basename(input_fn.replace(".pdb", ""))
+            self.load_file(input_fn, self.input_pdb)
+        else:
+            self.input_pdb = None
+
+        # Load ligand
+        if "LIGAND" in results["FILES_PATH"].keys():
+            ligand_fn = results["FILES_PATH"]["LIGAND"]
+            self.ligand_pdb = os.path.basename(ligand_fn.replace(".pdb", ""))
+            self.load_file(ligand_fn, self.ligand_pdb)
+        else:
+            self.ligand_pdb = None
+
+        # Load cavity
+        cavity_fn = results["FILES_PATH"]["OUTPUT"]
+        self.cavity_pdb = os.path.basename(cavity_fn.replace(".pdb", ""))
+        self.load_cavity(cavity_fn, self.cavity_pdb)
+
+        return
+
+    def characterization(self, cavities, step, atomic, vertices, probe_in, ignore_backbone):
+
+        surface, volume, area = pyKVFinder.spatial(cavities, step=step)
+        residues = pyKVFinder.constitutional(cavities, atomic, vertices, step=step, probe_in=probe_in, ignore_backbone=ignore_backbone)
+        frequencies = pyKVFinder.calculate_frequencies(residues)
+        scales, avg_hydropathy = pyKVFinder.hydropathy(surface, atomic, vertices, step=step, probe_in=probe_in, ignore_backbone=ignore_backbone)
+        depths, max_depth, avg_depth = pyKVFinder.depth(cavities, step=step)
+
+        return surface, volume, area, residues, scales, avg_hydropathy, depths, max_depth, avg_depth, frequencies
+ 
     def save_parameters(self) -> None:
 
         # Create base directory
@@ -312,28 +483,432 @@ class KVFinder(ToolInstance):
 
         # Save input pdb
         if self.ui.input.currentText() != "":
-            for x in all_atomic_structures(self.session).names:
-                if x == self.ui.input.currentText():
+            i = 0
+            atomicStructures = all_atomic_structures(self.session)
+            for i in range(0, len(atomicStructures.names)):
+                if atomicStructures.names[i] == self.ui.input.currentText():
                     pdb = os.path.join(
-                        os.path.join(basedir, f"{self.input.currentText()}.pdb")
+                        os.path.join(basedir, f"{self.ui.input.currentText()}.pdb")
                     )
                     #cmd.save(pdb, self.input.currentText(), 0, "pdb")
         else:
             from PyQt5.QtWidgets import QMessageBox
 
-            QMessageBox.critical(self, "Error", "Select an input PDB!")
+            QMessageBox.critical(self.tool_window, "Error", "Select an input PDB!")
             return False   
+        
+        # if self.ui.box_adjustment.isChecked():
+        #     if "box" not in cmd.get_names("all"):
+        #         from PyQt5.QtWidgets import QMessageBox
+
+        #         QMessageBox.critical(self, "Error", "Draw a box in PyMOL!")
+        #         return False
+
+        with open("parameters.toml", "w") as f:
+            f.write("# TOML configuration file for parKVFinder software.\n")
+            f.write('\ntitle = "parKVFinder parameters file"\n')
+
+            f.write("\n[FILES_PATH]\n")
+            f.write("# The path of van der Waals radii dictionary for parKVFinder.\n")
+            f.write(f'dictionary = "{self.ui.dictionary.text()}"\n')
+            # f.write("# The path of the input PDB file.\n")
+            # f.write(f'pdb = "{pdb}"\n')
+            f.write("# The path of the output directory.\n")
+            f.write(f'output = "{self.ui.output_dir_path.text()}"\n')
+            f.write("# Base name for output files.\n")
+            f.write(f'base_name = "{self.ui.base_name.text()}"\n')
+            # f.write("# Path for the ligand's PDB file.\n")
+            # f.write(f'ligand = "{ligand}"\n')
+
+            f.write("\n[SETTINGS]\n")
+            f.write("# Settings for parKVFinder software.\n")
+            f.write("\n[SETTINGS.modes]\n")
+            f.write(
+                "# Whole protein mode defines the search space as the whole protein.\n"
+            )
+            f.write(
+                f"whole_protein_mode = {'true' if not self.ui.box_adjustment.isChecked() else 'false'}\n"
+            )
+            f.write(
+                "# Box adjustment mode defines the search space as the box drawn in PyMOL.\n"
+            )
+            f.write(
+                f"box_mode = {'true' if self.ui.box_adjustment.isChecked() else 'false'}\n"
+            )
+            f.write(
+                "# Surface mode defines the type of surface representation to be applied, solvent excluded surface (true) or solvent accessible surface (false).\n"
+            )
+            f.write(
+                f"surface_mode = {'true' if self.ui.surface.currentText() == 'Solvent Excluded Surface (SES)' else 'false'}\n"
+            )
+            # f.write(
+            #     "# Cavity representation defines whether cavities are exported to the output PDB file as filled cavities (true) or filtered cavities (false).\n"
+            # )
+            # f.write(
+            #     f"kvp_mode = {'true' if self.ui.cavity_representation.currentText() == 'Full' else 'false'}\n"
+            # )
+            f.write(
+                "# Ligand adjustment mode defines the search space around the ligand.\n"
+            )
+            f.write(
+                f"ligand_mode = {'true' if self.ui.ligand_adjustment.isChecked() else 'false'}\n"
+            )
+
+            f.write("\n[SETTINGS.step_size]\n")
+            f.write(
+                "# Sets the 3D grid spacing. It directly affects accuracy and runtime.\n"
+            )
+            step = self.ui.step_size.value()
+            f.write(f"step_size = {step:.2f}\n")
+
+            f.write("\n[SETTINGS.probes]\n")
+            f.write(
+                "# parKVFinder works with a dual probe system. A smaller probe, called Probe In, and a bigger one, called Probe Out, rolls around the protein.\n"
+            )
+            f.write(
+                "# Points reached by the Probe In, but not the Probe Out are considered cavity points.\n"
+            )
+            f.write("# Sets the Probe In diameter. Default: 1.4 angstroms.\n")
+            f.write(f"probe_in = {self.ui.probe_in.value():.2f}\n")
+            f.write("# Sets the Probe Out diameter. Default: 4.0 angstroms.\n")
+            f.write(f"probe_out = {self.ui.probe_out.value():.2f}\n")
+
+            f.write("\n[SETTINGS.cutoffs]\n")
+            f.write(
+                "# Sets a volume cutoff for the detected cavities. Default: 5.0 angstroms.\n"
+            )
+            f.write(f"volume_cutoff = {self.ui.volume_cutoff.value():.2f}\n")
+            f.write(
+                "# Sets a distance cutoff for a search space around the ligand in ligand adjustment mode. Default: 5.0 angstroms.\n"
+            )
+            f.write(f"ligand_cutoff = {self.ui.ligand_cutoff.value():.2f}\n")
+            f.write(
+                "# Sets a removal distance for the cavity frontier, which is defined by comparing Probe In and Probe Out surfaces. Default: 2.4 angstroms.\n"
+            )
+            f.write(f"removal_distance = {self.ui.removal_distance.value():.2f}\n")
+
+            f.write("\n[SETTINGS.visiblebox]\n")
+            f.write(
+                "# Coordinates of the vertices that define the visible 3D grid. Only four points are required to define the search space.\n\n"
+            )
+            box = self.create_box_parameters()
+            d = {"SETTINGS": {"visiblebox": box}}
+            toml.dump(o=d, f=f)
+
+            f.write("\n[SETTINGS.internalbox]\n")
+            f.write("# Coordinates of the internal 3D grid. Used for calculations.\n\n")
+            # box = self.create_box_parameters(is_internal_box=True)
+            # d = {"SETTINGS": {"internalbox": box}}
+            toml.dump(o=d, f=f)
+
+        return True
+
+    def load_cavity(self, fname, name) -> None:
+
+        # Remove previous results in objects with same cavity name
+        # for obj in cmd.get_names("all"):
+        #     if name == obj:
+        #         cmd.delete(obj)
+
+        # Load cavity filename
+        if os.path.exists(fname):
+            from chimerax.pdb import open_pdb
+            models, status_message = open_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'output_cavity_{self.ui.input.currentText()}'))
+            self.session.models.add(models)
+            print(models)
+            print(status_message)
+            # cmd.load(fname, name, zoom=0)
+            # cmd.hide("everything", name)
+            # cmd.show("nonbonded", name)
+
+    def clean_results(self) -> None:
+        # Input File
+        self.ui.input_file_entry.setText(f"")
+
+        # Ligand File
+        self.ui.ligand_file_entry.setText(f"")
+
+        # Cavities File
+        self.ui.cavities_file_entry.setText(f"")
+
+        # Step Size
+        self.ui.step_size_entry.setText(f"")
+
+        # Volume
+        self.ui.volume_list.clear()
+
+        # Area
+        self.ui.area_list.clear()
+
+        # Depth
+        self.ui.avg_depth_list.clear()
+        self.ui.max_depth_list.clear()
+
+        # Hydropathy
+        self.ui.avg_hydropathy_list.clear()
+
+        # Residues
+        self.ui.residues_list.clear()
+
+    def refresh_information(self) -> None:
+        # Input File
+        if "INPUT" in results["FILES_PATH"].keys():
+            self.ui.input_file_entry.setText(f"{results['FILES_PATH']['INPUT']}")
+        else:
+            self.ui.input_file_entry.setText(f"")
+
+        # Ligand File
+        if "LIGAND" in results["FILES_PATH"].keys():
+            self.ui.ligand_file_entry.setText(f"{results['FILES_PATH']['LIGAND']}")
+        else:
+            self.ui.ligand_file_entry.setText(f"")
+
+        # Cavities File
+        self.ui.cavities_file_entry.setText(f"{results['FILES_PATH']['OUTPUT']}")
+
+        # Step Size
+        if "PARAMETERS" in results.keys():
+            if "STEP" in results["PARAMETERS"].keys():
+                self.ui.step_size_entry.setText(f"{results['PARAMETERS']['STEP']:.2f}")
+
+        return
+
+    def box_adjustment_help(self) -> None:
+        from PyQt5 import QtWidgets, QtCore
+
+        text = QtCore.QCoreApplication.translate(
+            "parKVFinder",
+            '<html><head/><body><p align="justify"><span style=" font-weight:600; text-decoration: underline;">Box Adjustment mode:</span></p><p align="justify">- Create a selection (optional);</p><p align="justify">- Define a <span style=" font-weight:600;">Padding</span> (optional);</p><p align="justify">- Click on <span style=" font-weight:600;">Draw Box</span> button.</p><p align="justify"><br/><span style="text-decoration: underline;">Customize your <span style=" font-weight:600;">box</span></span>:</p><p align="justify">- Change one item at a time (e.g. <span style=" font-style:italic;">Padding</span>, <span style=" font-style:italic;">Minimum X</span>, <span style=" font-style:italic;">Maximum X</span>, ...);</p><p align="justify">- Click on <span style=" font-weight:600;">Redraw Box</span> button.<br/></p><p><span style=" font-weight:400; text-decoration: underline;">Delete </span><span style=" text-decoration: underline;">box</span><span style=" font-weight:400; text-decoration: underline;">:</span></p><p align="justify">- Click on <span style=" font-weight:600;">Delete Box</span> button.<br/></p><p align="justify"><span style="text-decoration: underline;">Colors of the <span style=" font-weight:600;">box</span> object:</span></p><p align="justify">- <span style=" font-weight:600;">Red</span> corresponds to <span style=" font-weight:600;">X</span> axis;</p><p align="justify">- <span style=" font-weight:600;">Green</span> corresponds to <span style=" font-weight:600;">Y</span> axis;</p><p align="justify">- <span style=" font-weight:600;">Blue</span> corresponds to <span style=" font-weight:600;">Z</span> axis.</p></body></html>',
+            None,
+        )
+        help_information = QtWidgets.QMessageBox(self.tool_window)
+        help_information.setText(text)
+        help_information.setWindowTitle("Help")
+        help_information.setStyleSheet("QLabel{min-width:500 px;}")
+        help_information.exec_()
+
+    def set_box(self) -> None:
+        """
+        Create box coordinates, enable 'Delete Box' and 'Redraw Box' buttons and call draw_box function.
+        :param padding: box padding value.
+        """
+
+        cmd = ""
+
+        # Delete Box object in PyMOL
+        if "box" in cmd.get_names("all"):
+            cmd.delete("box")
+        # Get dimensions of selected residues
+        selection = "sele"
+        if selection in cmd.get_names("selections"):
+            ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent(selection)
+        else:
+            ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent("")
+
+        # Get center of each dimension (x, y, z)
+        self.x = (min_x + max_x) / 2
+        self.y = (min_y + max_y) / 2
+        self.z = (min_z + max_z) / 2
+
+        # Set Box variables in interface
+        self.ui.min_x.setValue(round(self.x - (min_x - self.padding.value()), 1))
+        self.ui.max_x.setValue(round((max_x + self.padding.value()) - self.x, 1))
+        self.ui.min_y.setValue(round(self.y - (min_y - self.padding.value()), 1))
+        self.ui.max_y.setValue(round((max_y + self.padding.value()) - self.y, 1))
+        self.ui.min_z.setValue(round(self.z - (min_z - self.padding.value()), 1))
+        self.ui.max_z.setValue(round((max_z + self.padding.value()) - self.z, 1))
+        self.ui.angle1.setValue(0)
+        self.ui.angle2.setValue(0)
+
+        # Setting background box values
+        self.min_x_set = self.min_x.value()
+        self.max_x_set = self.max_x.value()
+        self.min_y_set = self.min_y.value()
+        self.max_y_set = self.max_y.value()
+        self.min_z_set = self.min_z.value()
+        self.max_z_set = self.max_z.value()
+        self.angle1_set = self.angle1.value()
+        self.angle2_set = self.angle2.value()
+        self.padding_set = self.padding.value()
+
+        # Draw box
+        self.draw_box()
+
+        # Enable/Disable buttons
+        self.button_draw_box.setEnabled(False)
+        self.button_redraw_box.setEnabled(True)
+        self.min_x.setEnabled(True)
+        self.min_y.setEnabled(True)
+        self.min_z.setEnabled(True)
+        self.max_x.setEnabled(True)
+        self.max_y.setEnabled(True)
+        self.max_z.setEnabled(True)
+        self.angle1.setEnabled(True)
+        self.angle2.setEnabled(True)
+    
+    def create_box_parameters(
+        self, is_internal_box=False
+    ):
+        from math import pi, cos, sin
+
+        # Get box parameters
+        if self.ui.box_adjustment.isChecked():
+            min_x = self.min_x_set
+            max_x = self.max_x_set
+            min_y = self.min_y_set
+            max_y = self.max_y_set
+            min_z = self.min_z_set
+            max_z = self.max_z_set
+            angle1 = self.angle1_set
+            angle2 = self.angle2_set
+        else:
+            min_x = 0.0
+            max_x = 0.0
+            min_y = 0.0
+            max_y = 0.0
+            min_z = 0.0
+            max_z = 0.0
+            angle1 = 0.0
+            angle2 = 0.0
+
+        # Add probe_out to internal box
+        if is_internal_box:
+            min_x += self.ui.probe_out.value()
+            max_x += self.ui.probe_out.value()
+            min_y += self.ui.probe_out.value()
+            max_y += self.ui.probe_out.value()
+            min_z += self.ui.probe_out.value()
+            max_z += self.ui.probe_out.value()
+
+        # Convert angle
+        angle1 = (angle1 / 180.0) * pi
+        angle2 = (angle2 / 180.0) * pi
+
+        # Get positions of box vertices
+        # P1
+        x1 = (
+            -min_x * cos(angle2)
+            - (-min_y) * sin(angle1) * sin(angle2)
+            + (-min_z) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y1 = -min_y * cos(angle1) + (-min_z) * sin(angle1) + self.y
+
+        z1 = (
+            min_x * sin(angle2)
+            + min_y * sin(angle1) * cos(angle2)
+            - min_z * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P2
+        x2 = (
+            max_x * cos(angle2)
+            - (-min_y) * sin(angle1) * sin(angle2)
+            + (-min_z) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y2 = (-min_y) * cos(angle1) + (-min_z) * sin(angle1) + self.y
+
+        z2 = (
+            (-max_x) * sin(angle2)
+            - (-min_y) * sin(angle1) * cos(angle2)
+            + (-min_z) * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P3
+        x3 = (
+            (-min_x) * cos(angle2)
+            - max_y * sin(angle1) * sin(angle2)
+            + (-min_z) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y3 = max_y * cos(angle1) + (-min_z) * sin(angle1) + self.y
+
+        z3 = (
+            -(-min_x) * sin(angle2)
+            - max_y * sin(angle1) * cos(angle2)
+            + (-min_z) * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P4
+        x4 = (
+            (-min_x) * cos(angle2)
+            - (-min_y) * sin(angle1) * sin(angle2)
+            + max_z * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y4 = (-min_y) * cos(angle1) + max_z * sin(angle1) + self.y
+
+        z4 = (
+            -(-min_x) * sin(angle2)
+            - (-min_y) * sin(angle1) * cos(angle2)
+            + max_z * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # Create points
+        p1 = {"x": x1, "y": y1, "z": z1}
+        p2 = {"x": x2, "y": y2, "z": z2}
+        p3 = {"x": x3, "y": y3, "z": z3}
+        p4 = {"x": x4, "y": y4, "z": z4}
+        box = {"p1": p1, "p2": p2, "p3": p3, "p4": p4}
+
+        return box
+
+    def select_directory(self) -> None:
+        """
+        Callback for the "Browse ..." button
+        Open a QFileDialog to select a directory.
+        """
+        from PyQt5.QtWidgets import QFileDialog
+        from PyQt5.QtCore import QDir
+
+        fname = QFileDialog.getExistingDirectory(
+            caption="Choose Output Directory", directory=os.getcwd()
+        )
+
+        if fname:
+            fname = QDir.toNativeSeparators(fname)
+            if os.path.isdir(fname):
+                self.ui.output_dir_path.setText(fname)
+
+        return
 
     def cprint(self, text):
         return self.session.logger.info(text)
 
+    def get_number_of_cavities(self):
+        # Read results (Ubuntu/macOS)
+        results = toml.load(
+            f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+        )
 
-    def extract_pdb_session(self, selected=True):
+        return len(results["RESULTS"]["VOLUME"].keys())
+    
+    def extract_pdb_session(self, name, selected=True):
 
         if selected:
             sel_atoms = selected_atoms(self.session)
         else:
-            sel_atoms = all_atoms(self.session)
+            structures = all_atomic_structures(self.session)
+            for structure in structures:
+                if structure.name == name:
+                    sel_atoms = structure.atoms
+
+                    from chimerax.pdb import save_pdb
+                    save_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{name}'), models=[structure])
+                    break
+            else:
+                print(f"WARNING: I didn't find any structure with the name {name}")
+
+            # sel_atoms = all_atoms(self.session)
 
         self.cprint(f"Info: Selected Atoms {len(sel_atoms)}")
 
@@ -384,7 +959,6 @@ class KVFinder(ToolInstance):
             self.ui.step_size.setEnabled(False)
             self.ui.step_size.setValue(self._default.step)    
 
-
     def fill_context_menu(self, menu, x, y):
         # Add any tool-specific items to the given context menu (a QMenu instance).
         # The menu will then be automatically filled out with generic tool-related actions
@@ -412,7 +986,7 @@ class KVFinder(ToolInstance):
 
         # Get results file
         fname, _ = QFileDialog.getOpenFileName(
-            self, caption=caption, directory=os.getcwd(), filter=filters
+            self.tool_window, caption=caption, directory=os.getcwd(), filter=filters
         )
 
         if fname:
@@ -422,6 +996,59 @@ class KVFinder(ToolInstance):
 
         return
 
+    def refresh_area(self) -> None:
+        # Get cavity indexes
+        indexes = sorted(results["RESULTS"]["AREA"].keys())
+        # Include Area
+        for index in indexes:
+            item = f"{index}: {results['RESULTS']['AREA'][index]}"
+            self.ui.area_list.addItem(item)
+        return
+
+    def refresh_volume(self) -> None:
+        # Get cavity indexes
+        indexes = sorted(results["RESULTS"]["VOLUME"].keys())
+        # Include Volume
+        for index in indexes:
+            item = f"{index}: {results['RESULTS']['VOLUME'][index]}"
+            self.ui.volume_list.addItem(item)
+        return
+    
+    def refresh_avg_depth(self) -> None:
+        # Get cavity indexes
+        indexes = sorted(results["RESULTS"]["AVG_DEPTH"].keys())
+        # Include Average Depth
+        for index in indexes:
+            item = f"{index}: {results['RESULTS']['AVG_DEPTH'][index]}"
+            self.ui.avg_depth_list.addItem(item)
+        return
+
+    def refresh_max_depth(self) -> None:
+        # Get cavity indexes
+        indexes = sorted(results["RESULTS"]["MAX_DEPTH"].keys())
+        # Include Maximum Depth
+        for index in indexes:
+            item = f"{index}: {results['RESULTS']['MAX_DEPTH'][index]}"
+            self.ui.max_depth_list.addItem(item)
+        return
+
+    def refresh_avg_hydropathy(self) -> None:
+        # Get cavity indexes
+        indexes = sorted(results["RESULTS"]["AVG_HYDROPATHY"].keys())
+        # Include Average Hydropathy
+        for index in indexes:
+            if index != "EisenbergWeiss":
+                item = f"{index}: {results['RESULTS']['AVG_HYDROPATHY'][index]}"
+                self.ui.avg_hydropathy_list.addItem(item)
+        return
+
+    def refresh_residues(self) -> None:
+        # Get cavity indexes
+        indexes = sorted(results["RESULTS"]["RESIDUES"].keys())
+        # Include Interface Residues
+        for index in indexes:
+            self.ui.residues_list.addItem(index)
+        return
 
 class Ui_pyKVFinder(object):
     def setupUi(self, pyKVFinder):
@@ -580,8 +1207,7 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_14.addWidget(self.input)
 
         self.refresh_input = QtWidgets.QPushButton(self.hframe1)
-        sizePolicy = self._setPolicy(self.refresh_input)
-        self.refresh_input.setSizePolicy(sizePolicy)
+
 
         font = QtGui.QFont()
         font.setPointSize(10)
@@ -593,6 +1219,9 @@ class Ui_pyKVFinder(object):
         self.refresh_input.setFont(font)
         self.refresh_input.setObjectName("refresh_input")
 
+        sizePolicy = self._setPolicy(self.refresh_input)
+        self.refresh_input.setSizePolicy(sizePolicy)
+        
         self.horizontalLayout_14.addWidget(self.refresh_input)
         spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.horizontalLayout_14.addItem(spacerItem)
@@ -605,22 +1234,10 @@ class Ui_pyKVFinder(object):
         self.regionOption_frame = QtWidgets.QFrame(self.parameters)
         self.regionOption_frame.setObjectName("regionoption_frame")
 
-        # self.regionOption_box = QtWidgets.QGroupBox("Parts of structure")
-        # self.regionOption_box.setMinimumHeight(QtWidgets.QRadioButton().sizeHint().height()*4)
-        
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(5)
-        # sizePolicy.setHeightForWidth(self.regionOption_box.sizePolicy().hasHeightForWidth())
-        # sizePolicy = self._setPolicy(self.regionOption_box)
-        # self.regionOption_box.setSizePolicy(sizePolicy)
-
         self.hL_Option = QtWidgets.QHBoxLayout(self.regionOption_frame)  
         self.hL_Option.setSizeConstraint(QtWidgets.QLayout.SetDefaultConstraint)
         self.hL_Option.setObjectName("hL_Option")
         
-    
         self.regionOption_label = QtWidgets.QLabel("Structure: ")
         sizePolicy = self._setPolicy(self.regionOption_label)
         self.regionOption_label.setSizePolicy(sizePolicy)      
@@ -638,9 +1255,6 @@ class Ui_pyKVFinder(object):
         self.regionOption_label.setTextFormat(QtCore.Qt.PlainText)
         self.regionOption_label.setObjectName("regionOption_label")
 
-        
-
-
         self.hL_Option.addWidget(self.regionOption_label)
 
         self.regionOption_rbtn1 = QtWidgets.QRadioButton("Default")
@@ -656,21 +1270,23 @@ class Ui_pyKVFinder(object):
         self.groupButton.addButton(self.regionOption_rbtn2)
         self.groupButton.addButton(self.regionOption_rbtn3)
         self.groupButton.addButton(self.regionOption_rbtn4)
-        
-        self.buttonLayout.addLayout(self.regionOption_rbtn1)
 
-        self.buttonLayout.addWidget(self.regionOption_rbtn1)
-        self.buttonLayout.addWidget(self.regionOption_rbtn2)
-        self.buttonLayout.addWidget(self.regionOption_rbtn3)
-        self.buttonLayout.addWidget(self.regionOption_rbtn4)
+        self.hL_Option.addWidget(self.regionOption_rbtn1)
+        self.hL_Option.addWidget(self.regionOption_rbtn2)
+        self.hL_Option.addWidget(self.regionOption_rbtn3)
+        self.hL_Option.addWidget(self.regionOption_rbtn4)
 
-        self.hL_Option.addWidget(self.buttonLayout)
+        self.ignore_backbone_checkbox = QtWidgets.QCheckBox('Ignore Backbone')
+        self.ignore_backbone_checkbox.setChecked(False)
+
+        sizePolicy = self._setPolicy(self.ignore_backbone_checkbox)
+        self.ignore_backbone_checkbox.setSizePolicy(sizePolicy)
 
         self.hL_Option.addStretch(1)
 
-        # self.hL_Option.addWidget(self.regionOption_label
+        self.hL_Option.addWidget(self.ignore_backbone_checkbox)
 
-        # self.regionOption_box.setLayout(self.hL_Option)
+        self.hL_Option.addStretch(3)
 
         self.hframe1_5.addWidget(self.regionOption_frame)
 
@@ -679,48 +1295,29 @@ class Ui_pyKVFinder(object):
         self.hframe2 = QtWidgets.QHBoxLayout()
         self.hframe2.setObjectName("hframe2")
 
-        self.resolution_frame = QtWidgets.QFrame(self.parameters)
-        self.resolution_frame.setObjectName("resolution_frame")
-
-        self.horizontalLayout_21 = QtWidgets.QHBoxLayout(self.resolution_frame)
-        self.horizontalLayout_21.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
-        self.horizontalLayout_21.setObjectName("horizontalLayout_21")
-
-        self.resolution_label = QtWidgets.QCheckBox(self.resolution_frame)
-        self.resolution_label.setChecked(True)
-        self.resolution_label.setObjectName("resolution_label")
-
-        self.horizontalLayout_21.addWidget(self.resolution_label)
-
-        self.resolution = QtWidgets.QComboBox(self.resolution_frame)
-        self.resolution.setObjectName("resolution")
-        self.resolution.addItem("")
-        self.resolution.addItem("")
-        self.resolution.addItem("")
-        self.resolution.addItem("")
-
-        self.horizontalLayout_21.addWidget(self.resolution)
-
-        self.hframe2.addWidget(self.resolution_frame)
         self.step_size_frame = QtWidgets.QFrame(self.parameters)
         self.step_size_frame.setObjectName("step_size_frame")
+
         self.horizontalLayout_20 = QtWidgets.QHBoxLayout(self.step_size_frame)
         self.horizontalLayout_20.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_20.setObjectName("horizontalLayout_20")
-        self.step_size_label = QtWidgets.QCheckBox(self.step_size_frame)
+
+        self.step_size_label = QtWidgets.QLabel(self.step_size_frame)
         self.step_size_label.setObjectName("step_size_label")
+        self.step_size_label.setToolTip("<ul><li>Low: 0.6 Å</li><li>Medium: 0.5 Å</li><li>High: 0.25 Å</li></ul>")
         self.horizontalLayout_20.addWidget(self.step_size_label)
+
         self.step_size = QtWidgets.QDoubleSpinBox(self.step_size_frame)
-
         sizePolicy = self._setPolicy(self.step_size)
-
         self.step_size.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.step_size.setFont(font)
         self.step_size.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignVCenter)
         self.step_size.setDecimals(1)
@@ -728,8 +1325,11 @@ class Ui_pyKVFinder(object):
         self.step_size.setSingleStep(0.1)
         self.step_size.setProperty("value", 0.0)
         self.step_size.setObjectName("step_size")
+
         self.horizontalLayout_20.addWidget(self.step_size)
+
         self.hframe2.addWidget(self.step_size_frame)
+
         spacerItem1 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.hframe2.addItem(spacerItem1)
         self.verticalLayout.addLayout(self.hframe2)
@@ -740,38 +1340,29 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_13 = QtWidgets.QHBoxLayout(self.probe_in_frame)
         self.horizontalLayout_13.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_13.setObjectName("horizontalLayout_13")
+
         self.probe_in_label = QtWidgets.QLabel(self.probe_in_frame)
-
-        #sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        #sizePolicy.setHorizontalStretch(0)
-        #sizePolicy.setVerticalStretch(0)
-        #sizePolicy.setHeightForWidth(self.probe_in_label.sizePolicy().hasHeightForWidth())
-
         sizePolicy = self._setPolicy(self.probe_in_label)
-
         self.probe_in_label.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.probe_in_label.setFont(font)
         self.probe_in_label.setMouseTracking(True)
         self.probe_in_label.setFrameShape(QtWidgets.QFrame.NoFrame)
         self.probe_in_label.setTextFormat(QtCore.Qt.RichText)
         self.probe_in_label.setObjectName("probe_in_label")
         self.horizontalLayout_13.addWidget(self.probe_in_label)
+
         self.probe_in = QtWidgets.QDoubleSpinBox(self.probe_in_frame)
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.probe_in.sizePolicy().hasHeightForWidth())
-
         sizePolicy = self._setPolicy(self.probe_in)
-
         self.probe_in.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
@@ -791,15 +1382,9 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_10 = QtWidgets.QHBoxLayout(self.probe_out_frame)
         self.horizontalLayout_10.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_10.setObjectName("horizontalLayout_10")
+
         self.probe_out_label = QtWidgets.QLabel(self.probe_out_frame)
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.probe_out_label.sizePolicy().hasHeightForWidth())
-
         sizePolicy = self._setPolicy(self.probe_out_label)
-
         self.probe_out_label.setSizePolicy(sizePolicy)
         font = QtGui.QFont()
         font.setPointSize(10)
@@ -948,23 +1533,21 @@ class Ui_pyKVFinder(object):
         spacerItem3 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.hframe4_2.addItem(spacerItem3)
         self.verticalLayout.addLayout(self.hframe4_2)
+
         self.hframe_5 = QtWidgets.QHBoxLayout()
         self.hframe_5.setObjectName("hframe_5")
+
         self.surface_representation_frame = QtWidgets.QFrame(self.parameters)
         self.surface_representation_frame.setObjectName("surface_representation_frame")
+        
         self.horizontalLayout_26 = QtWidgets.QHBoxLayout(self.surface_representation_frame)
         self.horizontalLayout_26.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_26.setObjectName("horizontalLayout_26")
+
         self.surface_label = QtWidgets.QLabel(self.surface_representation_frame)
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.surface_label.sizePolicy().hasHeightForWidth())
-
         sizePolicy = self._setPolicy(self.surface_label)
-
         self.surface_label.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
@@ -983,63 +1566,61 @@ class Ui_pyKVFinder(object):
         self.surface.addItem("")
         self.horizontalLayout_26.addWidget(self.surface)
         self.hframe_5.addWidget(self.surface_representation_frame)
-        self.cavity_representation_frame = QtWidgets.QFrame(self.parameters)
-        self.cavity_representation_frame.setObjectName("cavity_representation_frame")
-        self.horizontalLayout_11 = QtWidgets.QHBoxLayout(self.cavity_representation_frame)
-        self.horizontalLayout_11.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
-        self.horizontalLayout_11.setObjectName("horizontalLayout_11")
-        self.cavity_representation_label = QtWidgets.QLabel(self.cavity_representation_frame)
 
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.cavity_representation_label.sizePolicy().hasHeightForWidth())
+        # self.cavity_representation_frame = QtWidgets.QFrame(self.parameters)
+        # self.cavity_representation_frame.setObjectName("cavity_representation_frame")
+        # self.horizontalLayout_11 = QtWidgets.QHBoxLayout(self.cavity_representation_frame)
+        # self.horizontalLayout_11.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
+        # self.horizontalLayout_11.setObjectName("horizontalLayout_11")
+        # self.cavity_representation_label = QtWidgets.QLabel(self.cavity_representation_frame)
 
-        sizePolicy = self._setPolicy(self.cavity_representation_label)
+        # # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
+        # # sizePolicy.setHorizontalStretch(0)
+        # # sizePolicy.setVerticalStretch(0)
+        # # sizePolicy.setHeightForWidth(self.cavity_representation_label.sizePolicy().hasHeightForWidth())
 
-        self.cavity_representation_label.setSizePolicy(sizePolicy)
-        font = QtGui.QFont()
-        font.setPointSize(10)
-        font.setBold(False)
-        font.setItalic(False)
-        font.setWeight(50)
-        font.setKerning(True)
-        self.cavity_representation_label.setFont(font)
-        self.cavity_representation_label.setMouseTracking(True)
-        self.cavity_representation_label.setFrameShape(QtWidgets.QFrame.NoFrame)
-        self.cavity_representation_label.setTextFormat(QtCore.Qt.RichText)
-        self.cavity_representation_label.setObjectName("cavity_representation_label")
-        self.horizontalLayout_11.addWidget(self.cavity_representation_label)
-        self.cavity_representation = QtWidgets.QComboBox(self.cavity_representation_frame)
-        self.cavity_representation.setObjectName("cavity_representation")
-        self.cavity_representation.addItem("")
-        self.cavity_representation.addItem("")
-        self.horizontalLayout_11.addWidget(self.cavity_representation)
-        self.hframe_5.addWidget(self.cavity_representation_frame)
+        # sizePolicy = self._setPolicy(self.cavity_representation_label)
+
+        # self.cavity_representation_label.setSizePolicy(sizePolicy)
+        # font = QtGui.QFont()
+        # font.setPointSize(10)
+        # font.setBold(False)
+        # font.setItalic(False)
+        # font.setWeight(50)
+        # font.setKerning(True)
+        # self.cavity_representation_label.setFont(font)
+        # self.cavity_representation_label.setMouseTracking(True)
+        # self.cavity_representation_label.setFrameShape(QtWidgets.QFrame.NoFrame)
+        # self.cavity_representation_label.setTextFormat(QtCore.Qt.RichText)
+        # self.cavity_representation_label.setObjectName("cavity_representation_label")
+        # self.horizontalLayout_11.addWidget(self.cavity_representation_label)
+        # self.cavity_representation = QtWidgets.QComboBox(self.cavity_representation_frame)
+        # self.cavity_representation.setObjectName("cavity_representation")
+        # self.cavity_representation.addItem("")
+        # self.cavity_representation.addItem("")
+        # self.horizontalLayout_11.addWidget(self.cavity_representation)
+        # self.hframe_5.addWidget(self.cavity_representation_frame)
         spacerItem4 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.hframe_5.addItem(spacerItem4)
         self.verticalLayout.addLayout(self.hframe_5)
+
         self.hframe6_2 = QtWidgets.QFrame(self.parameters)
         self.hframe6_2.setObjectName("hframe6_2")
         self.horizontalLayout_15 = QtWidgets.QHBoxLayout(self.hframe6_2)
         self.horizontalLayout_15.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
         self.horizontalLayout_15.setObjectName("horizontalLayout_15")
+
         self.output_base_name_label = QtWidgets.QLabel(self.hframe6_2)
-
-        # sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
-        # sizePolicy.setHorizontalStretch(0)
-        # sizePolicy.setVerticalStretch(0)
-        # sizePolicy.setHeightForWidth(self.output_base_name_label.sizePolicy().hasHeightForWidth())
-
         sizePolicy = self._setPolicy(self.output_base_name_label)
-
         self.output_base_name_label.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.output_base_name_label.setFont(font)
         self.output_base_name_label.setMouseTracking(False)
         self.output_base_name_label.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -1047,12 +1628,14 @@ class Ui_pyKVFinder(object):
         self.output_base_name_label.setObjectName("output_base_name_label")
         self.horizontalLayout_15.addWidget(self.output_base_name_label)
         self.base_name = QtWidgets.QLineEdit(self.hframe6_2)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.base_name.setFont(font)
         self.base_name.setText("output")
         self.base_name.setCursorMoveStyle(QtCore.Qt.VisualMoveStyle)
@@ -1062,6 +1645,7 @@ class Ui_pyKVFinder(object):
         spacerItem5 = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
         self.horizontalLayout_15.addItem(spacerItem5)
         self.verticalLayout.addWidget(self.hframe6_2)
+
         self.hframe7_2 = QtWidgets.QFrame(self.parameters)
         self.hframe7_2.setObjectName("hframe7_2")
         self.horizontalLayout_12 = QtWidgets.QHBoxLayout(self.hframe7_2)
@@ -1118,25 +1702,25 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_12.addWidget(self.button_browse)
 
         self.verticalLayout.addWidget(self.hframe7_2)
-        self.verticalLayout_8.addWidget(self.parameters)
 
-        self.file_locations = QtWidgets.QGroupBox(self.main)
-        self.file_locations.setObjectName("file_locations")
 
-        self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.file_locations)
-        self.verticalLayout_3.setSpacing(3)
-        self.verticalLayout_3.setObjectName("verticalLayout_3")
+        # self.file_locations = QtWidgets.QGroupBox(self.main)
+        # self.file_locations.setObjectName("file_locations")
 
-        self.hframe5_2 = QtWidgets.QFrame(self.file_locations)
-        self.hframe5_2.setObjectName("hframe5_2")
+        # self.verticalLayout_3 = QtWidgets.QVBoxLayout(self.file_locations)
+        # self.verticalLayout_3.setSpacing(3)
+        # self.verticalLayout_3.setObjectName("verticalLayout_3")
 
-        self.horizontalLayout_24 = QtWidgets.QHBoxLayout(self.hframe5_2)
-        self.horizontalLayout_24.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
-        self.horizontalLayout_24.setObjectName("horizontalLayout_24")
+        # self.hframe5_2 = QtWidgets.QFrame(self.parameters)
+        # self.hframe5_2.setObjectName("hframe5_2")
+
+        # self.horizontalLayout_24 = QtWidgets.QHBoxLayout(self.hframe5_2)
+        # self.horizontalLayout_24.setSizeConstraint(QtWidgets.QLayout.SetNoConstraint)
+        # self.horizontalLayout_24.setObjectName("horizontalLayout_24")
         
-        self.verticalLayout_3.addWidget(self.hframe5_2)
+        # self.verticalLayout_3.addWidget(self.hframe5_2)
 
-        self.hframe5_3 = QtWidgets.QFrame(self.file_locations)
+        self.hframe5_3 = QtWidgets.QFrame(self.parameters)
         self.hframe5_3.setObjectName("hframe5_3")
 
         self.horizontalLayout_25 = QtWidgets.QHBoxLayout(self.hframe5_3)
@@ -1144,16 +1728,16 @@ class Ui_pyKVFinder(object):
         self.horizontalLayout_25.setObjectName("horizontalLayout_25")
 
         self.dictionary_label = QtWidgets.QLabel(self.hframe5_3)
-
         sizePolicy = self._setPolicy(self.dictionary_label)
-
         self.dictionary_label.setSizePolicy(sizePolicy)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.dictionary_label.setFont(font)
         self.dictionary_label.setMouseTracking(False)
         self.dictionary_label.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -1161,12 +1745,14 @@ class Ui_pyKVFinder(object):
         self.dictionary_label.setObjectName("dictionary_label")
         self.horizontalLayout_25.addWidget(self.dictionary_label)
         self.dictionary = QtWidgets.QLineEdit(self.hframe5_3)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.dictionary.setFont(font)
         self.dictionary.setText("")
         self.dictionary.setEchoMode(QtWidgets.QLineEdit.Normal)
@@ -1175,21 +1761,26 @@ class Ui_pyKVFinder(object):
         self.dictionary.setObjectName("dictionary")
         self.horizontalLayout_25.addWidget(self.dictionary)
         self.button_browse3 = QtWidgets.QPushButton(self.hframe5_3)
+
         font = QtGui.QFont()
         font.setPointSize(10)
         font.setBold(False)
         font.setItalic(False)
         font.setWeight(50)
         font.setKerning(True)
+
         self.button_browse3.setFont(font)
         self.button_browse3.setText("Browse...")
         self.button_browse3.setObjectName("button_browse3")
         self.horizontalLayout_25.addWidget(self.button_browse3)
-        self.verticalLayout_3.addWidget(self.hframe5_3)
-        self.verticalLayout_8.addWidget(self.file_locations)
+        self.verticalLayout.addWidget(self.hframe5_3)
+        self.verticalLayout_8.addWidget(self.parameters)
+
+
         spacerItem6 = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
         self.verticalLayout_8.addItem(spacerItem6)
         self.tabs.addTab(self.main, "")
+
         self.search_space = QtWidgets.QWidget()
         self.search_space.setObjectName("search_space")
         self.gridLayout_4 = QtWidgets.QGridLayout(self.search_space)
@@ -1887,26 +2478,26 @@ class Ui_pyKVFinder(object):
         self.parameters.setTitle(_translate("pyKVFinder", "Parameters"))
         self.input_label.setText(_translate("pyKVFinder", "Input PDB:"))
         self.refresh_input.setText(_translate("pyKVFinder", "Refresh"))
-        self.resolution_label.setText(_translate("pyKVFinder", "Resolution:"))
-        self.resolution.setItemText(0, _translate("pyKVFinder", "Low"))
-        self.resolution.setItemText(1, _translate("pyKVFinder", "Medium"))
-        self.resolution.setItemText(2, _translate("pyKVFinder", "High"))
-        self.resolution.setItemText(3, _translate("pyKVFinder", "Off"))
+        # self.resolution_label.setText(_translate("pyKVFinder", "Resolution:"))
+        # self.resolution.setItemText(0, _translate("pyKVFinder", "Low"))
+        # self.resolution.setItemText(1, _translate("pyKVFinder", "Medium"))
+        # self.resolution.setItemText(2, _translate("pyKVFinder", "High"))
+        # self.resolution.setItemText(3, _translate("pyKVFinder", "Off"))
         self.step_size_label.setText(_translate("pyKVFinder", "Step Size (Å):"))
         self.probe_in_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Probe In (Å):</p></body></html>"))
         self.probe_out_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Probe Out (Å):</p></body></html>"))
         self.removal_distance_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Removal Distance (Å):</p></body></html>"))
         self.volume_cutoff_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Volume Cutoff (Å³):</p></body></html>"))
         self.surface_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Surface Representation:</p></body></html>"))
-        self.surface.setItemText(0, _translate("pyKVFinder", "Molecular Surface (VdW)"))
+        self.surface.setItemText(0, _translate("pyKVFinder", "Solvent Excluded Surface (SES)"))
         self.surface.setItemText(1, _translate("pyKVFinder", "Solvent Accesible Surface (SAS)"))
-        self.cavity_representation_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Cavity Representation:</p></body></html>"))
-        self.cavity_representation.setItemText(0, _translate("pyKVFinder", "Filtered"))
-        self.cavity_representation.setItemText(1, _translate("pyKVFinder", "Full"))
+        # self.cavity_representation_label.setText(_translate("pyKVFinder", "<html><head/><body><p>Cavity Representation:</p></body></html>"))
+        # self.cavity_representation.setItemText(0, _translate("pyKVFinder", "Filtered"))
+        # self.cavity_representation.setItemText(1, _translate("pyKVFinder", "Full"))
         self.output_base_name_label.setText(_translate("pyKVFinder", "Output Base Name:"))
         self.output_dir_label.setText(_translate("pyKVFinder", "Output Directory:"))
-        self.file_locations.setTitle(_translate("pyKVFinder", "File Locations"))
-        #self.parKVFinder_label.setText(_translate("pyKVFinder", "parKVFinder:"))
+        # self.file_locations.setTitle(_translate("pyKVFinder", "File Locations"))
+        # self.parKVFinder_label.setText(_translate("pyKVFinder", "parKVFinder:"))
         self.dictionary_label.setText(_translate("pyKVFinder", "vdW dictionary:"))
         self.tabs.setTabText(self.tabs.indexOf(self.main), _translate("pyKVFinder", "Main"))
         self.box_adjustment.setTitle(_translate("pyKVFinder", "Box Adjustment"))
@@ -2020,6 +2611,7 @@ class SampleGUI(QtWidgets.QWidget):
         self.tool = tool
         self.u = self.tool.ui
         self.s = self.tool.session
+        self.all_objects = all_objects
         self.cx = cx
         self.log = ""
         

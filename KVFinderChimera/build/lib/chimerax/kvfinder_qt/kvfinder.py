@@ -15,6 +15,7 @@ from chimerax.core.objects import all_objects
 from chimerax.core.tools import ToolInstance
 from chimerax.atomic import StructureSeq, Structure, selected_atoms, all_atoms, structure_atoms, all_atomic_structures
 from chimerax.core.commands import run
+from chimerax.std_commands import color
 from os.path import expanduser
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QDialog
@@ -123,6 +124,11 @@ class KVFinder(ToolInstance):
         self.ligand_pdb = None
         self.cavity_pdb = None
 
+        # Lists Selected
+        self.vs_selected = []
+
+
+
         self._connect_ui()
 
         # Restore Default Parameters
@@ -186,6 +192,20 @@ class KVFinder(ToolInstance):
         self.ui.button_exit.clicked.connect(self.tool_window.close)
         self.ui.button_load_results.clicked.connect(self.load_results)
     
+
+        self.ui.volume_list.itemSelectionChanged.connect(
+            lambda list1=self.ui.volume_list, list2=self.ui.area_list: self.show_cavities(
+                list1, list2
+            )
+        )
+        self.ui.area_list.itemSelectionChanged.connect(
+            lambda list1=self.ui.area_list, list2=self.ui.volume_list: self.show_cavities(
+                list1, list2
+            )
+        )
+
+
+
     def _optionCheck(self, btn):
 
         if btn.isChecked():
@@ -429,31 +449,36 @@ class KVFinder(ToolInstance):
         # # Set default view in results
         self.ui.default_view.setChecked(True)
 
+
         # # Load files as PyMOL objects
         # cmd.delete("cavities")
         # cmd.delete("residues")
         # cmd.frame(1)
 
-        # # Load input
-        # if "INPUT" in results["FILES_PATH"].keys():
-        #     input_fn = results["FILES_PATH"]["INPUT"]
-        #     self.input_pdb = os.path.basename(input_fn.replace(".pdb", ""))
-        #     self.load_file(input_fn, self.input_pdb)
-        # else:
-        #     self.input_pdb = None
+        # Load input
+        models_loaded = [model.name for model in self.session.models]
+        if "INPUT" in results["FILES_PATH"].keys():
+            input_fn = results["FILES_PATH"]["INPUT"]
+            self.input_pdb = os.path.basename(input_fn)
+            if os.path.split(input_fn)[-1] not in models_loaded:
+                self.load_file(input_fn, self.input_pdb)
+        else:
+            self.input_pdb = None
 
-        # # Load ligand
-        # if "LIGAND" in results["FILES_PATH"].keys():
-        #     ligand_fn = results["FILES_PATH"]["LIGAND"]
-        #     self.ligand_pdb = os.path.basename(ligand_fn.replace(".pdb", ""))
-        #     self.load_file(ligand_fn, self.ligand_pdb)
-        # else:
-        #     self.ligand_pdb = None
+        # Load ligand
+        if "LIGAND" in results["FILES_PATH"].keys():
+            ligand_fn = results["FILES_PATH"]["LIGAND"]
+            self.ligand_pdb = os.path.basename(ligand_fn)
+            if os.path.split(ligand_fn)[-1] not in models_loaded:
+                self.load_file(ligand_fn, self.ligand_pdb)
+        else:
+            self.ligand_pdb = None
 
         # Load cavity
         cavity_fn = results["FILES_PATH"]["OUTPUT"]
-        self.cavity_pdb = os.path.basename(cavity_fn.replace(".pdb", ""))
-        self.load_cavity(cavity_fn, self.cavity_pdb)
+        self.cavity_pdb = os.path.basename(cavity_fn)
+        if os.path.split(cavity_fn)[-1] not in models_loaded:
+            self.load_file(cavity_fn, self.cavity_pdb)
 
         return
 
@@ -601,7 +626,8 @@ class KVFinder(ToolInstance):
 
         return True
 
-    def load_cavity(self, fname, name) -> None:
+
+    def load_file(self, fname, name) -> None:
 
         # Remove previous results in objects with same cavity name
         # for obj in cmd.get_names("all"):
@@ -611,10 +637,9 @@ class KVFinder(ToolInstance):
         # Load cavity filename
         if os.path.exists(fname):
             from chimerax.pdb import open_pdb
-            models, status_message = open_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'output_cavity_{self.ui.input.currentText()}'))
+            # models, status_message = open_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'output_cavity_{self.ui.input.currentText()}'))
+            models, status_message = open_pdb(self.session, fname)
             self.session.models.add(models)
-            print(models)
-            print(status_message)
             # cmd.load(fname, name, zoom=0)
             # cmd.hide("everything", name)
             # cmd.show("nonbonded", name)
@@ -725,8 +750,10 @@ class KVFinder(ToolInstance):
         self.max_y_set = self.max_y.value()
         self.min_z_set = self.min_z.value()
         self.max_z_set = self.max_z.value()
+
         self.angle1_set = self.angle1.value()
         self.angle2_set = self.angle2.value()
+        
         self.padding_set = self.padding.value()
 
         # Draw box
@@ -735,12 +762,14 @@ class KVFinder(ToolInstance):
         # Enable/Disable buttons
         self.button_draw_box.setEnabled(False)
         self.button_redraw_box.setEnabled(True)
+
         self.min_x.setEnabled(True)
         self.min_y.setEnabled(True)
         self.min_z.setEnabled(True)
         self.max_x.setEnabled(True)
         self.max_y.setEnabled(True)
         self.max_z.setEnabled(True)
+
         self.angle1.setEnabled(True)
         self.angle2.setEnabled(True)
     
@@ -1047,6 +1076,85 @@ class KVFinder(ToolInstance):
         for index in indexes:
             self.ui.residues_list.addItem(index)
         return
+
+    def show_cavities(self, list1, list2) -> None:
+
+        # Get items from list1
+        cavs = []
+        deselect = []
+
+        # Select items of list2
+        number_of_items = list1.count()
+        for index in range(number_of_items):
+            item1 = list1.item(index)
+            item2 = list2.item(index)
+
+            if item1.text()[0:3] not in self.vs_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+                self.vs_selected.append(item1.text()[0:3])
+                item2.setSelected(True)
+
+            elif item1.text()[0:3] in self.vs_selected and item1.isSelected() == False:
+                self.vs_selected.remove(item1.text()[0:3])
+                deselect.append(item1.text()[0:3])
+                item2.setSelected(False)
+
+        # Clean objects
+        # cmd.set("auto_zoom", 0)
+        # cmd.delete("cavs")
+        # cmd.delete("cavities")
+
+
+
+        # Check if cavity file is loaded
+
+        objects = all_objects(self.session)
+        models = objects.models
+        
+
+        for item in models:
+            if item.name == self.cavity_pdb:
+                spec = item.atomspec
+                break
+        else:
+            return
+        
+        # Return if no cavity is selected
+        if len(cavs) > 0:
+            command = f"color {spec}:{cavs[0]} blue"
+        elif len(deselect) > 0:
+            command = f"color {spec}:{deselect[0]} white"
+        else:
+            return
+        
+        run(self.session, command)
+
+        # cmd.select("cavs", command)
+
+        # # Create cavities object with blue nonbonded
+        # cmd.create("cavities", "cavs")
+        # cmd.delete("cavs")
+        # cmd.color("blue", "cavities")
+        # cmd.show("nonbonded", "cavities")
+
+        # # Color surface cavity points as red nb_spheres
+        # cmd.select("cavs", "cavities and name HS+HA")
+        # cmd.color("red", "cavs")
+        # cmd.show("nb_spheres", "cavs")
+        # cmd.delete("cavs")
+
+        # # Reset cavities output object
+        # cmd.disable(self.cavity_pdb)
+        # cmd.enable(self.cavity_pdb)
+        # for item in cmd.get_names("all"):
+        #     if item == "hydropathy":
+        #         cmd.disable("hydropathy")
+        #         cmd.enable("hydropathy")
+        #     if item == "depths":
+        #         cmd.disable("depths")
+        #         cmd.enable("depths")
+        # cmd.set("auto_zoom", 1)
+
 
 class Ui_pyKVFinder(object):
     def setupUi(self, pyKVFinder):

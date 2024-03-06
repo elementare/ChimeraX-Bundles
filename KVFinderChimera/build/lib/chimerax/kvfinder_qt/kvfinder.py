@@ -15,7 +15,7 @@ from chimerax.core.objects import all_objects
 from chimerax.core.tools import ToolInstance
 from chimerax.atomic import StructureSeq, Structure, selected_atoms, all_atoms, structure_atoms, all_atomic_structures
 from chimerax.core.commands import run
-from chimerax.std_commands import color
+from chimerax.std_commands import style
 from os.path import expanduser
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QDialog
@@ -126,6 +126,9 @@ class KVFinder(ToolInstance):
 
         # Lists Selected
         self.vs_selected = []
+        self.am_selected = []
+        self.hyd_selected = []
+        self.res_selected = []
 
 
 
@@ -204,6 +207,25 @@ class KVFinder(ToolInstance):
             )
         )
 
+        self.ui.avg_depth_list.itemSelectionChanged.connect(
+            lambda list1=self.ui.avg_depth_list, list2=self.ui.max_depth_list: self.show_depth(
+                list1, list2
+            )
+        )
+        self.ui.max_depth_list.itemSelectionChanged.connect(
+            lambda list1=self.ui.max_depth_list, list2=self.ui.avg_depth_list: self.show_depth(
+                list1, list2
+            )
+        )
+
+        self.ui.avg_hydropathy_list.itemSelectionChanged.connect(
+            lambda list1=self.ui.avg_hydropathy_list: self.show_hydropathy(list1)
+        )
+
+        self.ui.residues_list.itemSelectionChanged.connect(self.show_residues)
+        self.ui.default_view.toggled.connect(self.show_default_view)
+        self.ui.depth_view.toggled.connect(self.show_depth_view)
+        self.ui.hydropathy_view.toggled.connect(self.show_hydropathy_view)
 
 
     def _optionCheck(self, btn):
@@ -312,65 +334,79 @@ class KVFinder(ToolInstance):
         """
         return    
     
-    def run(self) -> None:
+    def _run_pyKVFinder(self, atomic):
         import time
+        print(
+            f"\n[==> Running pyKVFinder for: {os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.input.currentText()}')}"
+        )
+        start = time.time()
+        probe_out = self.ui.probe_out.value()
+        probe_in = self.ui.probe_in.value()
+        removal_distance = self.ui.removal_distance.value()
+        volume_cutoff = self.ui.volume_cutoff.value()
+        step = self.ui.step_size.value()
+        ignore_backbone = True if self.ui.ignore_backbone_checkbox.isChecked() else False
+        surface =  'SES' if self.ui.surface.currentText() == 'Solvent Excluded Surface (SES)' else 'SAS'
 
-        if self.save_parameters():
-            if self.region_option == "Default":
-                atomic = self.extract_pdb_session(selected=False, name=self.ui.input.currentText())
-                print(
-                    f"\n[==> Running pyKVFinder for: {os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.input.currentText()}.pdb')}"
-                )
-                start = time.time()
-                probe_out = self.ui.probe_out.value()
-                probe_in = self.ui.probe_in.value()
-                removal_distance = self.ui.removal_distance.value()
-                volume_cutoff = self.ui.volume_cutoff.value()
-                step = self.ui.step_size.value()
-                print(step)
-                ignore_backbone = True if self.ui.ignore_backbone_checkbox.isChecked() else False
-                surface =  'SES' if self.ui.surface.currentText() == 'Solvent Excluded Surface (SES)' else 'SAS'
+        vertices = pyKVFinder.get_vertices(atomic, probe_out=probe_out, step=step)
+        ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
+        elapsed_time = time.time() - start
+        print(f"> Cavities detected: {ncavs}")
+        print(f"> Elapsed time: {elapsed_time:.2f} seconds")
 
-                vertices = pyKVFinder.get_vertices(atomic, probe_out=probe_out, step=step)
-                ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
-                elapsed_time = time.time() - start
-                print(f"> Cavities detected: {ncavs}")
-                print(f"> Elapsed time: {elapsed_time:.2f} seconds")
+                    # Load successfull run
+        self.ui.results_file_entry.setText(
+            f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+        )
 
-                            # Load successfull run
-                self.ui.results_file_entry.setText(
+        if ncavs > 0:
+            self.ui.tabs.setCurrentIndex(2)
+            surface, volume, area, residues, scales, avg_hydropathy, depths, max_depth, avg_depth, frequencies = self.characterization(cavities=cavities, step=step, atomic=atomic, vertices=vertices, probe_in=probe_in, ignore_backbone=ignore_backbone)
+            
+            if os.path.exists(
+                f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+            ):
+                os.remove(
                     f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
                 )
 
-                if ncavs > 0:
-                    self.ui.tabs.setCurrentIndex(2)
-                    surface, volume, area, residues, scales, avg_hydropathy, depths, max_depth, avg_depth, frequencies = self.characterization(cavities=cavities, step=step, atomic=atomic, vertices=vertices, probe_in=probe_in, ignore_backbone=ignore_backbone)
-                    
-                    if os.path.exists(
-                        f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
-                    ):
-                        os.remove(
-                            f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
-                        )
+            output_cavity = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.cavity_{self.ui.input.currentText()}')
+            pyKVFinder.export(output_cavity, cavities, surface, vertices, step=step, B=depths, Q=scales)
 
-                    output_cavity = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'output_cavity_{self.ui.input.currentText()}')
-                    pyKVFinder.export(output_cavity, cavities, surface, vertices, step=step, B=depths, Q=scales)
+            pdb = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.input.currentText()}')
 
-                    pdb = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{self.ui.input.currentText()}')
-
-                    output_results = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', 'results.toml')
-                    pyKVFinder.write_results(output_results, ligand=None, input=pdb, output=output_cavity, volume=volume, area=area, max_depth=max_depth, avg_depth=avg_depth, avg_hydropathy=avg_hydropathy, residues=residues, frequencies=frequencies, step=step)
-                    
-                    os.rename(
-                        output_results,
-                        f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
-                    )
+            output_results = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(),'results.toml')
+            pyKVFinder.write_results(output_results, ligand=None, input=pdb, output=output_cavity, volume=volume, area=area, max_depth=max_depth, avg_depth=avg_depth, avg_hydropathy=avg_hydropathy, residues=residues, frequencies=frequencies, step=step)
+            
+            os.rename(
+                output_results,
+                f"{os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.base_name.text()}.KVFinder.results.toml')}"
+            )
 
 
-                    
-                    self.load_results()
-                elif ncavs == 0:
-                    QtWidgets.QMessageBox.warning(self.tool_window, "Warning!", "No cavities found!")
+
+            self.load_results()
+        elif ncavs == 0:
+            QtWidgets.QMessageBox.warning(self.tool_window, "Warning!", "No cavities found!")
+    
+    def run(self) -> None:
+        if self.save_parameters():
+            model = self._get_model(self.ui.input.currentText())
+            spec = model.atomspec
+            if self.region_option == "Default":
+                atomic = self.extract_pdb_session(selected=False, name=self.ui.input.currentText())
+                self._run_pyKVFinder(atomic)
+            elif self.region_option == "Selected":
+                atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
+                self._run_pyKVFinder(atomic)              
+            elif self.regio_option == "Protein":
+                run(self.session, f"sel {spec} & protein")
+                atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
+                self._run_pyKVFinder(atomic)    
+            elif self.region_option == "All ligands without solvent":
+                run(self.session, f"sel {spec} & solvent")
+                atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
+                self._run_pyKVFinder(atomic)    
             else:
 
                 QtWidgets.QMessageBox.critical(
@@ -480,6 +516,18 @@ class KVFinder(ToolInstance):
         if os.path.split(cavity_fn)[-1] not in models_loaded:
             self.load_file(cavity_fn, self.cavity_pdb)
 
+        objects = all_objects(self.session)
+        models = objects.models
+        
+        for model in models:
+            if model.name == self.cavity_pdb:
+                break
+        else:
+            return
+        
+        # style.style(self.session, model, atom_style='ball', dashes=5)
+        # run(self.session, f"surface {model.atomspec}; transparency 50")
+
         return
 
     def characterization(self, cavities, step, atomic, vertices, probe_in, ignore_backbone):
@@ -506,13 +554,14 @@ class KVFinder(ToolInstance):
 
         # Save input pdb
         if self.ui.input.currentText() != "":
-            i = 0
-            atomicStructures = all_atomic_structures(self.session)
-            for i in range(0, len(atomicStructures.names)):
-                if atomicStructures.names[i] == self.ui.input.currentText():
-                    pdb = os.path.join(
-                        os.path.join(basedir, f"{self.ui.input.currentText()}.pdb")
-                    )
+            model = self._get_model(self.ui.input.currentText())
+
+
+            pdb = os.path.join(
+                os.path.join(basedir, f"{self.ui.input.currentText()}")
+            )
+            from chimerax.pdb import save_pdb
+            save_pdb(self.session, pdb, models=[model])
                     #cmd.save(pdb, self.input.currentText(), 0, "pdb")
         else:
             from PyQt5.QtWidgets import QMessageBox
@@ -929,9 +978,9 @@ class KVFinder(ToolInstance):
                 if structure.name == name:
                     sel_atoms = structure.atoms
 
-                    from chimerax.pdb import save_pdb
-                    save_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{name}'), models=[structure])
-                    break
+                    # from chimerax.pdb import save_pdb
+                    # save_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{name}.pdb'), models=[structure])
+                    # break
             else:
                 print(f"WARNING: I didn't find any structure with the name {name}")
 
@@ -1076,6 +1125,129 @@ class KVFinder(ToolInstance):
         for index in indexes:
             self.ui.residues_list.addItem(index)
         return
+    
+    def _get_model(self, name) -> None:
+        objects = all_objects(self.session)
+        models = objects.models
+        
+        for model in models:
+            if model.name == name:
+                return model
+        else:       
+            return False
+
+    def _deselect_all_items(self, list_widget):
+        for index in range(list_widget.count()):
+            item = list_widget.item(index)
+            if item.isSelected():
+                item.setSelected(False)
+
+    def _reset_areas(self):
+        listWidgets = [self.ui.volume_list, self.ui.area_list, self.ui.avg_depth_list, self.ui.max_depth_list, self.ui.avg_hydropathy_list, self.ui.residues_list]
+        for widget in listWidgets:
+            self._deselect_all_items(widget)
+
+    def show_residues(self) -> None:
+
+        # Select items of list2
+        list1 = self.ui.residues_list
+        cavs = []
+        residues = []
+        deselect = []
+        deselects_res = []
+        number_of_items = list1.count()
+        for index in range(number_of_items):
+            item1 = list1.item(index)
+
+            if item1.text()[0:3] not in self.res_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+                self.res_selected.append(item1.text()[0:3])
+
+
+            elif item1.text()[0:3] in self.res_selected and item1.isSelected() == False:
+                self.res_selected.remove(item1.text()[0:3])
+                deselect.append(item1.text()[0:3])
+            
+            elif item1.text()[0:3] in self.res_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+
+        for cav in cavs:
+            for residue in results["RESULTS"]["RESIDUES"][cav]:
+                if residue not in residues:
+                    residues.append(residue)
+        
+
+
+
+        model = self._get_model(self.input_pdb)
+
+        if model:
+            spec = model.atomspec
+            if deselect:
+
+                for residue in results["RESULTS"]["RESIDUES"][deselect[0]]:
+                    if residue not in deselects_res:
+                        deselects_res.append(residue)
+                command = spec
+
+                while len(deselects_res) > 0:
+                    res, chain, _ = deselects_res.pop(0)
+                    command = f"{command}/{chain}:{res}"
+                command_hide = f"hide {command}"
+                run(self.session, command_hide)
+                return 
+            # Select residues
+
+            command = spec
+            while len(residues) > 0:
+                res, chain, _ = residues.pop(0)
+                command = f"{command}/{chain}:{res}"
+            command_show = f"show {command}"
+
+            run(self.session, command_show)
+
+            command_style = f"style {command} stick"
+            run(self.session, command_style)
+
+        else:
+            print(f"Didn't find the model {self.input_pdb}")
+
+        
+    def show_default_view(self) -> None:
+
+        model = self._get_model(self.cavity_pdb)
+
+        if model:
+            spec = model.atomspec
+            command = f"color {spec} white"
+            run(self.session, command)
+            self._reset_areas()
+        else:
+            print(f"Didn't find the model {self.cavity_pdb}")
+    def show_depth_view(self) -> None:
+
+        model = self._get_model(self.cavity_pdb)
+
+        if model:
+            spec = model.atomspec
+            command = f"color byattribute bfactor {spec} palette rainbow"
+            run(self.session, command)
+            self._reset_areas()
+        else:
+            print(f"Didn't find the model {self.cavity_pdb}")
+
+    def show_hydropathy_view(self) -> None:
+
+        model = self._get_model(self.cavity_pdb)
+
+        if model:
+            spec = model.atomspec
+            command = f"color byattribute occupancy {spec} palette yellow:white:blue"
+            run(self.session, command)
+            self._reset_areas()
+        else:
+            print(f"Didn't find the model {self.cavity_pdb}")
+
 
     def show_cavities(self, list1, list2) -> None:
 
@@ -1099,61 +1271,109 @@ class KVFinder(ToolInstance):
                 deselect.append(item1.text()[0:3])
                 item2.setSelected(False)
 
-        # Clean objects
-        # cmd.set("auto_zoom", 0)
-        # cmd.delete("cavs")
-        # cmd.delete("cavities")
+        model = self._get_model(self.cavity_pdb)
 
-
-
-        # Check if cavity file is loaded
-
-        objects = all_objects(self.session)
-        models = objects.models
-        
-
-        for item in models:
-            if item.name == self.cavity_pdb:
-                spec = item.atomspec
-                break
+        if model:
+            spec = model.atomspec
+            # Return if no cavity is selected
+            if len(cavs) > 0:
+                command = f"color {spec}:{cavs[0]} red"
+            elif len(deselect) > 0:
+                command = f"color {spec}:{deselect[0]} white"
+            else:
+                return
+            
+            run(self.session, command)
+            # style(self.session, spec, atom_style='ball', dashes=5)
         else:
-            return
+            print(f"Didn't find the model {self.cavity_pdb}")
+
+    def show_depth(self, list1, list2) -> None:
+
+        # Get items from list1
+        cavs = []
+        deselect = []
+
+        # Select items of list2
+        number_of_items = list1.count()
+        for index in range(number_of_items):
+            item1 = list1.item(index)
+            item2 = list2.item(index)
+
+            if item1.text()[0:3] not in self.am_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+                self.am_selected.append(item1.text()[0:3])
+                item2.setSelected(True)
+
+            elif item1.text()[0:3] in self.am_selected and item1.isSelected() == False:
+                self.am_selected.remove(item1.text()[0:3])
+                deselect.append(item1.text()[0:3])
+                item2.setSelected(False)
+            elif item1.text()[0:3] in self.am_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+
+        model = self._get_model(self.cavity_pdb)
+
+        if model:
+            spec = model.atomspec
         
-        # Return if no cavity is selected
-        if len(cavs) > 0:
-            command = f"color {spec}:{cavs[0]} blue"
-        elif len(deselect) > 0:
-            command = f"color {spec}:{deselect[0]} white"
+            # Return if no cavity is selected
+            if len(cavs) > 0:
+                command = f"color byattribute bfactor {spec}:"
+                while len(cavs) > 0:
+                    command = f"{command}{cavs.pop(0)}:"
+                command = command[:-1] + " palette rainbow"
+                run(self.session, command)
+
+            if len(deselect) > 0:
+                command = f"color {spec}:{deselect[0]} white"
+                run(self.session, command)
+            else:
+                return
         else:
-            return
+            print(f"Didn't find the model {self.cavity_pdb}")
+
+    def show_hydropathy(self, list1) -> None:
+
+        # Get items from list1
+        cavs = []
+        deselect = []
+
+        # Select items of list2
+        number_of_items = list1.count()
+        for index in range(number_of_items):
+            item1 = list1.item(index)
+
+            if item1.text()[0:3] not in self.hyd_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+                self.hyd_selected.append(item1.text()[0:3])
+
+            elif item1.text()[0:3] in self.hyd_selected and item1.isSelected() == False:
+                self.hyd_selected.remove(item1.text()[0:3])
+                deselect.append(item1.text()[0:3])
+            elif item1.text()[0:3] in self.hyd_selected and item1.isSelected():
+                cavs.append(item1.text()[0:3])
+
+        model = self._get_model(self.cavity_pdb)
+
+        if model:
+            spec = model.atomspec
         
-        run(self.session, command)
+            # Return if no cavity is selected
+            if len(cavs) > 0:
+                command = f"color byattribute occupancy {spec}:"
+                while len(cavs) > 0:
+                    command = f"{command}{cavs.pop(0)}:"
+                command = command[:-1] + " palette yellow:white:blue"
+                run(self.session, command)
 
-        # cmd.select("cavs", command)
-
-        # # Create cavities object with blue nonbonded
-        # cmd.create("cavities", "cavs")
-        # cmd.delete("cavs")
-        # cmd.color("blue", "cavities")
-        # cmd.show("nonbonded", "cavities")
-
-        # # Color surface cavity points as red nb_spheres
-        # cmd.select("cavs", "cavities and name HS+HA")
-        # cmd.color("red", "cavs")
-        # cmd.show("nb_spheres", "cavs")
-        # cmd.delete("cavs")
-
-        # # Reset cavities output object
-        # cmd.disable(self.cavity_pdb)
-        # cmd.enable(self.cavity_pdb)
-        # for item in cmd.get_names("all"):
-        #     if item == "hydropathy":
-        #         cmd.disable("hydropathy")
-        #         cmd.enable("hydropathy")
-        #     if item == "depths":
-        #         cmd.disable("depths")
-        #         cmd.enable("depths")
-        # cmd.set("auto_zoom", 1)
+            if len(deselect) > 0:
+                command = f"color {spec}:{deselect[0]} white"
+                run(self.session, command)
+            else:
+                return
+        else:
+            print(f"Didn't find the model {self.cavity_pdb}")
 
 
 class Ui_pyKVFinder(object):
@@ -1368,7 +1588,7 @@ class Ui_pyKVFinder(object):
         self.regionOption_rbtn1.setAutoExclusive(True)
         self.regionOption_rbtn2  = QtWidgets.QRadioButton("Selected")
         self.regionOption_rbtn3 = QtWidgets.QRadioButton("Protein")
-        self.regionOption_rbtn4  = QtWidgets.QRadioButton("All ligands without HOH")
+        self.regionOption_rbtn4  = QtWidgets.QRadioButton("All ligands without solvent")
 
         self.groupButton = QtWidgets.QButtonGroup(self.regionOption_frame)
 

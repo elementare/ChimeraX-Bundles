@@ -1,7 +1,0 @@
-ChimeraX_TutorialToolQt.egg-info/PKG-INFO
-ChimeraX_TutorialToolQt.egg-info/SOURCES.txt
-ChimeraX_TutorialToolQt.egg-info/dependency_links.txt
-ChimeraX_TutorialToolQt.egg-info/requires.txt
-ChimeraX_TutorialToolQt.egg-info/top_level.txt
-src/__init__.py
-src/tool.py

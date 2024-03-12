@@ -1,7 +1,0 @@
-ChimeraX_TutorialSelector.egg-info/PKG-INFO
-ChimeraX_TutorialSelector.egg-info/SOURCES.txt
-ChimeraX_TutorialSelector.egg-info/dependency_links.txt
-ChimeraX_TutorialSelector.egg-info/requires.txt
-ChimeraX_TutorialSelector.egg-info/top_level.txt
-src/__init__.py
-src/selector.py

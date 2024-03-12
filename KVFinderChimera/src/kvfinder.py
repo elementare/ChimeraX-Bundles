@@ -29,6 +29,16 @@ import toml
 
 dialog = None
 
+"""
+va, nv, ta = cx.surface.box_geometry((0,0,20), (10, 10, 10))
+
+shape = cx.shape.shape
+model = self.s.models[0]
+centers = np.mean(model.atoms.residues.centers, axis=0)
+print(centers)
+s = shape._show_surface(self.s, va, ta, color = (190,190,190,50), center = centers, rotation = None, qrotation = None, coordinate_system = None, mesh = False, slab = None, model_id = None, shape_name="box") 
+"""
+
 class _Default(object):
     def __init__(self):
         super(_Default, self).__init__()
@@ -399,7 +409,7 @@ class KVFinder(ToolInstance):
             elif self.region_option == "Selected":
                 atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
                 self._run_pyKVFinder(atomic)              
-            elif self.regio_option == "Protein":
+            elif self.region_option == "Protein":
                 run(self.session, f"sel {spec} & protein")
                 atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
                 self._run_pyKVFinder(atomic)    
@@ -1239,10 +1249,14 @@ class KVFinder(ToolInstance):
     def show_hydropathy_view(self) -> None:
 
         model = self._get_model(self.cavity_pdb)
+        inpModel = self._get_model(self.input_pdb)
 
         if model:
             spec = model.atomspec
-            command = f"color byattribute occupancy {spec} palette yellow:white:blue"
+            if inpModel:
+                command = f"contacts {inpModel.atomspec} restrict {spec} reveal false select true; select subtract {inpModel.atomspec}; color byattribute occupancy {spec} palette yellow:white:blue"
+            else:
+                command = f"contacts protein restrict {spec} reveal false select true; select subtract protein; color byattribute occupancy {spec} palette yellow:white:blue"
             run(self.session, command)
             self._reset_areas()
         else:
@@ -1319,10 +1333,12 @@ class KVFinder(ToolInstance):
         
             # Return if no cavity is selected
             if len(cavs) > 0:
-                command = f"color byattribute bfactor {spec}:"
-                while len(cavs) > 0:
-                    command = f"{command}{cavs.pop(0)}:"
-                command = command[:-1] + " palette rainbow"
+                cavs = ":".join(cavs)
+                command = f"color byattribute bfactor {spec}:{cavs} palette rainbow"
+                cavs = []
+                # while len(cavs) > 0:
+                #     command = f"{command}{cavs.pop(0)}:"
+                # command = command[:-1] + " palette rainbow"
                 run(self.session, command)
 
             if len(deselect) > 0:
@@ -1355,16 +1371,25 @@ class KVFinder(ToolInstance):
                 cavs.append(item1.text()[0:3])
 
         model = self._get_model(self.cavity_pdb)
+        inpModel = self._get_model(self.input_pdb)
 
         if model:
             spec = model.atomspec
         
             # Return if no cavity is selected
             if len(cavs) > 0:
-                command = f"color byattribute occupancy {spec}:"
-                while len(cavs) > 0:
-                    command = f"{command}{cavs.pop(0)}:"
-                command = command[:-1] + " palette yellow:white:blue"
+                cavs = ":".join(cavs)
+                
+                if inpModel:
+                    command = f"contacts {inpModel.atomspec} restrict {spec}:{cavs} reveal false select true; select subtract {inpModel.atomspec}; color byattribute occupancy sel palette yellow:white:blue"
+                else:
+                    command = f"contacts protein restrict {spec}:{cavs} reveal false select true; select subtract protein; color byattribute occupancy sel palette yellow:white:blue"
+                
+                # command = f"color byattribute occupancy {spec}:"
+                # while len(cavs) > 0:
+                #     command = f"{command}{cavs.pop(0)}:"
+                # command = command[:-1] + " palette yellow:white:blue"
+
                 run(self.session, command)
 
             if len(deselect) > 0:

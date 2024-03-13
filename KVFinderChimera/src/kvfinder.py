@@ -176,11 +176,6 @@ class KVFinder(ToolInstance):
         # hook up resolution-step CheckBox callbacks
         # self.ui.resolution_label.clicked.connect(self.check_resolution)
 
-        # Parts Button
-        # self.ui.regionOption_rbtn1.toggled.connect(self._optionCheck)
-        # self.ui.regionOption_rbtn2.toggled.connect(self._optionCheck)
-        # self.ui.regionOption_rbtn3.toggled.connect(self._optionCheck)
-        # self.ui.regionOption_rbtn4.toggled.connect(self._optionCheck)
 
         self.ui.groupButton.buttonClicked.connect(self._optionCheck)
 
@@ -237,6 +232,12 @@ class KVFinder(ToolInstance):
         self.ui.depth_view.toggled.connect(self.show_depth_view)
         self.ui.hydropathy_view.toggled.connect(self.show_hydropathy_view)
 
+
+        # hook up Search Space button callbacks
+        # Box Adjustment
+        self.ui.button_draw_box.clicked.connect(self.set_box)
+        # self.ui.button_delete_box.clicked.connect(self.delete_box)
+        # self.ui.button_redraw_box.clicked.connect(self.redraw_box)
 
     def _optionCheck(self, btn):
 
@@ -775,63 +776,333 @@ class KVFinder(ToolInstance):
         :param padding: box padding value.
         """
 
-        cmd = ""
+        # cmd = ""
 
-        # Delete Box object in PyMOL
-        if "box" in cmd.get_names("all"):
-            cmd.delete("box")
-        # Get dimensions of selected residues
-        selection = "sele"
-        if selection in cmd.get_names("selections"):
-            ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent(selection)
-        else:
-            ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent("")
+        # # Delete Box object in PyMOL
+        # if "box" in cmd.get_names("all"):
+        #     cmd.delete("box")
+        # # Get dimensions of selected residues
+        # selection = "sele"
+        # if selection in cmd.get_names("selections"):
+        #     ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent(selection)
+        # else:
+        #     ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent("")
 
+
+        sel_atoms = selected_atoms(self.session)
+        
+        minCoords = sel_atoms.coords.min(axis=0)
+        maxCoords = sel_atoms.coords.max(axis=0)
+        
+        min_x, min_y, min_z = minCoords[0], minCoords[1], minCoords[2]
+        max_x, max_y, max_z = maxCoords[0], maxCoords[1], maxCoords[2]
+   
         # Get center of each dimension (x, y, z)
         self.x = (min_x + max_x) / 2
         self.y = (min_y + max_y) / 2
         self.z = (min_z + max_z) / 2
 
         # Set Box variables in interface
-        self.ui.min_x.setValue(round(self.x - (min_x - self.padding.value()), 1))
-        self.ui.max_x.setValue(round((max_x + self.padding.value()) - self.x, 1))
-        self.ui.min_y.setValue(round(self.y - (min_y - self.padding.value()), 1))
-        self.ui.max_y.setValue(round((max_y + self.padding.value()) - self.y, 1))
-        self.ui.min_z.setValue(round(self.z - (min_z - self.padding.value()), 1))
-        self.ui.max_z.setValue(round((max_z + self.padding.value()) - self.z, 1))
+        self.ui.min_x.setValue(round(self.x - (min_x - self.ui.padding.value()), 1))
+        self.ui.max_x.setValue(round((max_x + self.ui.padding.value()) - self.x, 1))
+        self.ui.min_y.setValue(round(self.y - (min_y - self.ui.padding.value()), 1))
+        self.ui.max_y.setValue(round((max_y + self.ui.padding.value()) - self.y, 1))
+        self.ui.min_z.setValue(round(self.z - (min_z - self.ui.padding.value()), 1))
+        self.ui.max_z.setValue(round((max_z + self.ui.padding.value()) - self.z, 1))
         self.ui.angle1.setValue(0)
         self.ui.angle2.setValue(0)
 
         # Setting background box values
-        self.min_x_set = self.min_x.value()
-        self.max_x_set = self.max_x.value()
-        self.min_y_set = self.min_y.value()
-        self.max_y_set = self.max_y.value()
-        self.min_z_set = self.min_z.value()
-        self.max_z_set = self.max_z.value()
+        self.min_x_set = self.ui.min_x.value()
+        self.max_x_set = self.ui.max_x.value()
+        self.min_y_set = self.ui.min_y.value()
+        self.max_y_set = self.ui.max_y.value()
+        self.min_z_set = self.ui.min_z.value()
+        self.max_z_set = self.ui.max_z.value()
 
-        self.angle1_set = self.angle1.value()
-        self.angle2_set = self.angle2.value()
+        self.angle1_set = self.ui.angle1.value()
+        self.angle2_set = self.ui.angle2.value()
         
-        self.padding_set = self.padding.value()
+        self.padding_set = self.ui.padding.value()
 
         # Draw box
         self.draw_box()
 
         # Enable/Disable buttons
-        self.button_draw_box.setEnabled(False)
-        self.button_redraw_box.setEnabled(True)
+        self.ui.button_draw_box.setEnabled(False)
+        self.ui.button_redraw_box.setEnabled(True)
 
-        self.min_x.setEnabled(True)
-        self.min_y.setEnabled(True)
-        self.min_z.setEnabled(True)
-        self.max_x.setEnabled(True)
-        self.max_y.setEnabled(True)
-        self.max_z.setEnabled(True)
+        self.ui.min_x.setEnabled(True)
+        self.ui.min_y.setEnabled(True)
+        self.ui.min_z.setEnabled(True)
+        self.ui.max_x.setEnabled(True)
+        self.ui.max_y.setEnabled(True)
+        self.ui.max_z.setEnabled(True)
 
-        self.angle1.setEnabled(True)
-        self.angle2.setEnabled(True)
-    
+        self.ui.angle1.setEnabled(True)
+        self.ui.angle2.setEnabled(True)
+        
+    def box_geometry(self, p1, p2, p3, p4, p5, p6, p7, p8):
+        #       v2 ---- v3
+        #        |\      |\
+        #        | v6 ---- v7 = urf
+        #        |  |    | |
+        #        |  |    | |
+        # llb = v0 -|---v1 |
+        #         \ |     \|
+        #          v4 ---- v5
+
+        vertices = np.array([
+            p2, p7, p8, p1, p5, p6, p4, p3
+        ], dtype=np.float32)
+
+        normals = np.array([
+            # -x, v0-v4-v2-v6
+            [-1, 0, 0],
+            [-1, 0, 0],
+            [-1, 0, 0],
+            [-1, 0, 0],
+
+            # -y, v0-v1-v4-v5
+            [0, -1, 0],
+            [0, -1, 0],
+            [0, -1, 0],
+            [0, -1, 0],
+
+            # -z, v1-v0-v3-v2
+            [0, 0, -1],
+            [0, 0, -1],
+            [0, 0, -1],
+            [0, 0, -1],
+
+            # x, v5-v1-v7-v3
+            [1, 0, 0],
+            [1, 0, 0],
+            [1, 0, 0],
+            [1, 0, 0],
+
+            # y, v3-v2-v7-v6
+            [0, 1, 0],
+            [0, 1, 0],
+            [0, 1, 0],
+            [0, 1, 0],
+
+            # z, v4-v5-v6-v7
+            [0, 0, 1],
+            [0, 0, 1],
+            [0, 0, 1],
+            [0, 0, 1],
+        ], dtype=np.float32)
+        
+        triangles = np.array([
+            [0, 1, 2], [2, 1, 3],           # -x
+            [4, 5, 6], [6, 5, 7],           # -y
+            [8, 9, 10], [10, 9, 11],        # -z
+            [12, 13, 14], [14, 13, 15],     # x
+            [16, 17, 18], [18, 17, 19],     # y
+            [20, 21, 22], [22, 21, 23],     # z
+        ], dtype=np.int32)
+        
+        return vertices, normals, triangles
+
+    def draw_box(self) -> None:
+        """
+        Callback for the "Draw box" button.
+
+        This method calculates each vertice of the custom box. Then, it draws and connects them on the PyMOL viewer as a object named 'box'.
+        """
+        from math import cos, pi, sin
+
+        # Convert angle
+        angle1 = (self.ui.angle1.value() / 180.0) * pi
+        angle2 = (self.ui.angle2.value() / 180.0) * pi
+
+        # Get positions of box vertices
+        # P1
+        x1 = (
+            -self.ui.min_x.value() * cos(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * sin(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y1 = (
+            -self.ui.min_y.value() * cos(angle1)
+            + (-self.ui.min_z.value()) * sin(angle1)
+            + self.y
+        )
+
+        z1 = (
+            self.ui.min_x.value() * sin(angle2)
+            + self.ui.min_y.value() * sin(angle1) * cos(angle2)
+            - self.ui.min_z.value() * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P2
+        x2 = (
+            self.ui.max_x.value() * cos(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * sin(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y2 = (
+            (-self.ui.min_y.value()) * cos(angle1)
+            + (-self.ui.min_z.value()) * sin(angle1)
+            + self.y
+        )
+
+        z2 = (
+            (-self.ui.max_x.value()) * sin(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * cos(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P3
+        x3 = (
+            (-self.ui.min_x.value()) * cos(angle2)
+            - self.ui.max_y.value() * sin(angle1) * sin(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y3 = (
+            self.ui.max_y.value() * cos(angle1)
+            + (-self.ui.min_z.value()) * sin(angle1)
+            + self.y
+        )
+
+        z3 = (
+            -(-self.ui.min_x.value()) * sin(angle2)
+            - self.ui.max_y.value() * sin(angle1) * cos(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P4
+        x4 = (
+            (-self.ui.min_x.value()) * cos(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * sin(angle2)
+            + self.ui.max_z.value() * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y4 = (
+            (-self.ui.min_y.value()) * cos(angle1)
+            + self.ui.max_z.value() * sin(angle1)
+            + self.y
+        )
+
+        z4 = (
+            -(-self.ui.min_x.value()) * sin(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * cos(angle2)
+            + self.ui.max_z.value() * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P5
+        x5 = (
+            self.ui.max_x.value() * cos(angle2)
+            - self.ui.max_y.value() * sin(angle1) * sin(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y5 = (
+            self.ui.max_y.value() * cos(angle1)
+            + (-self.ui.min_z.value()) * sin(angle1)
+            + self.y
+        )
+
+        z5 = (
+            (-self.ui.max_x.value()) * sin(angle2)
+            - self.ui.max_y.value() * sin(angle1) * cos(angle2)
+            + (-self.ui.min_z.value()) * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P6
+        x6 = (
+            self.ui.max_x.value() * cos(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * sin(angle2)
+            + self.ui.max_z.value() * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y6 = (
+            (-self.ui.min_y.value()) * cos(angle1)
+            + self.ui.max_z.value() * sin(angle1)
+            + self.y
+        )
+
+        z6 = (
+            (-self.ui.max_x.value()) * sin(angle2)
+            - (-self.ui.min_y.value()) * sin(angle1) * cos(angle2)
+            + self.ui.max_z.value() * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P7
+        x7 = (
+            (-self.ui.min_x.value()) * cos(angle2)
+            - self.ui.max_y.value() * sin(angle1) * sin(angle2)
+            + self.ui.max_z.value() * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y7 = (
+            self.ui.max_y.value() * cos(angle1) + self.ui.max_z.value() * sin(angle1) + self.y
+        )
+
+        z7 = (
+            -(-self.ui.min_x.value()) * sin(angle2)
+            - self.ui.max_y.value() * sin(angle1) * cos(angle2)
+            + self.ui.max_z.value() * cos(angle1) * cos(angle2)
+            + self.z
+        )
+
+        # P8
+        x8 = (
+            self.ui.max_x.value() * cos(angle2)
+            - self.ui.max_y.value() * sin(angle1) * sin(angle2)
+            + self.ui.max_z.value() * cos(angle1) * sin(angle2)
+            + self.x
+        )
+
+        y8 = (
+            self.ui.max_y.value() * cos(angle1) + self.ui.max_z.value() * sin(angle1) + self.y
+        )
+
+        z8 = (
+            (-self.ui.max_x.value()) * sin(angle2)
+            - self.ui.max_y.value() * sin(angle1) * cos(angle2)
+            + self.ui.max_z.value() * cos(angle1) * cos(angle2)
+            + self.z
+        )
+        
+        P1 = [x1, y1, z1]
+        P2 = [x2, y2, z2]
+        P3 = [x3, y3, z3]
+        P4 = [x4, y4, z4]
+        P5 = [x5, y5, z5]
+        P6 = [x6, y6, z6]
+        P7 = [x7, y7, z7]
+        P8 = [x8, y8, z8]
+        
+        from chimerax.shape.shape import _show_surface
+        
+        varray, normals, tarray = self.box_geometry(P1, P2, P3, P4, P5, P6, P7, P8)
+
+        s = _show_surface(self.session, varray=varray, tarray=tarray, color = (190, 190, 190, 200), mesh=False,
+                      center=None, rotation=None, qrotation=None, coordinate_system=None,
+                      slab=None, model_id= None, shape_name="box")
+        
+        print("Já passei do _show_surface")
+
+
+  
     def create_box_parameters(
         self, is_internal_box=False
     ):
@@ -1252,11 +1523,9 @@ class KVFinder(ToolInstance):
         inpModel = self._get_model(self.input_pdb)
 
         if model:
-            spec = model.atomspec
-            if inpModel:
-                command = f"contacts {inpModel.atomspec} restrict {spec} reveal false select true; select subtract {inpModel.atomspec}; color byattribute occupancy {spec} palette yellow:white:blue"
-            else:
-                command = f"contacts protein restrict {spec} reveal false select true; select subtract protein; color byattribute occupancy {spec} palette yellow:white:blue"
+            spec = model.atomspec + "@HA"
+
+            command = f"color byattribute occupancy {spec} palette yellow:white:blue"
             run(self.session, command)
             self._reset_areas()
         else:
@@ -1399,7 +1668,6 @@ class KVFinder(ToolInstance):
                 return
         else:
             print(f"Didn't find the model {self.cavity_pdb}")
-
 
 class Ui_pyKVFinder(object):
     def setupUi(self, pyKVFinder):

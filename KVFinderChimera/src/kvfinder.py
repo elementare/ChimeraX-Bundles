@@ -236,8 +236,8 @@ class KVFinder(ToolInstance):
         # hook up Search Space button callbacks
         # Box Adjustment
         self.ui.button_draw_box.clicked.connect(self.set_box)
-        # self.ui.button_delete_box.clicked.connect(self.delete_box)
-        # self.ui.button_redraw_box.clicked.connect(self.redraw_box)
+        self.ui.button_delete_box.clicked.connect(self.delete_box)
+        self.ui.button_redraw_box.clicked.connect(self.redraw_box)
 
     def _optionCheck(self, btn):
 
@@ -329,23 +329,10 @@ class KVFinder(ToolInstance):
             else:
                 print(f"{pdbNames}, {type(pdbNames)}")
         
-        """
-        combo_box.clear()
-        for item in cmd.get_names("all"):
-            if (
-                cmd.get_type(item) == "object:molecule"
-                and item != "box"
-                and item != "grid"
-                and item != "cavities"
-                and item != "residues"
-                and item[-16:] != ".KVFinder.output"
-                and item != "target_exclusive"
-            ):
-                combo_box.addItem(item)
-        """
+
         return    
     
-    def _run_pyKVFinder(self, atomic):
+    def _run_pyKVFinder(self, atomic, box_adjustment = False):
         import time
         print(
             f"\n[==> Running pyKVFinder for: {os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.input.currentText()}')}"
@@ -359,8 +346,14 @@ class KVFinder(ToolInstance):
         ignore_backbone = True if self.ui.ignore_backbone_checkbox.isChecked() else False
         surface =  'SES' if self.ui.surface.currentText() == 'Solvent Excluded Surface (SES)' else 'SAS'
 
-        vertices = pyKVFinder.get_vertices(atomic, probe_out=probe_out, step=step)
-        ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
+        if not box_adjustment:
+            vertices = pyKVFinder.get_vertices(atomic, probe_out=probe_out, step=step)
+            ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
+        else:
+            fn = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), "parameters.toml")
+            print(fn)
+            vertices, atomic = pyKVFinder.get_vertices_from_file(fn, atomic, step=step, probe_in=probe_in, probe_out=probe_out)
+            ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, box_adjustment=True, surface=surface)
         elapsed_time = time.time() - start
         print(f"> Cavities detected: {ncavs}")
         print(f"> Elapsed time: {elapsed_time:.2f} seconds")
@@ -404,7 +397,10 @@ class KVFinder(ToolInstance):
         if self.save_parameters():
             model = self._get_model(self.ui.input.currentText())
             spec = model.atomspec
-            if self.region_option == "Default":
+            if self.ui.box_adjustment.isChecked():
+                atomic = self.extract_pdb_session(selected=False, name=self.ui.input.currentText())
+                self._run_pyKVFinder(atomic, box_adjustment = True)
+            elif self.region_option == "Default":
                 atomic = self.extract_pdb_session(selected=False, name=self.ui.input.currentText())
                 self._run_pyKVFinder(atomic)
             elif self.region_option == "Selected":
@@ -526,16 +522,12 @@ class KVFinder(ToolInstance):
         self.cavity_pdb = os.path.basename(cavity_fn)
         if os.path.split(cavity_fn)[-1] not in models_loaded:
             self.load_file(cavity_fn, self.cavity_pdb)
-
-        objects = all_objects(self.session)
-        models = objects.models
-        
-        for model in models:
-            if model.name == self.cavity_pdb:
-                break
         else:
-            return
-        
+            models = all_objects(self.session).models
+            for model in models:
+                if model.name == self.cavity_pdb:
+                    model.delete()
+                    self.load_file(cavity_fn, self.cavity_pdb)
         # style.style(self.session, model, atom_style='ball', dashes=5)
         # run(self.session, f"surface {model.atomspec}; transparency 50")
 
@@ -567,7 +559,6 @@ class KVFinder(ToolInstance):
         if self.ui.input.currentText() != "":
             model = self._get_model(self.ui.input.currentText())
 
-
             pdb = os.path.join(
                 os.path.join(basedir, f"{self.ui.input.currentText()}")
             )
@@ -587,7 +578,7 @@ class KVFinder(ToolInstance):
         #         QMessageBox.critical(self, "Error", "Draw a box in PyMOL!")
         #         return False
 
-        with open("parameters.toml", "w") as f:
+        with open(os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), "parameters.toml"), "w") as f:
             f.write("# TOML configuration file for parKVFinder software.\n")
             f.write('\ntitle = "parKVFinder parameters file"\n')
 
@@ -597,7 +588,7 @@ class KVFinder(ToolInstance):
             # f.write("# The path of the input PDB file.\n")
             # f.write(f'pdb = "{pdb}"\n')
             f.write("# The path of the output directory.\n")
-            f.write(f'output = "{self.ui.output_dir_path.text()}"\n')
+            f.write(f"output = '{self.ui.output_dir_path.text()}'\n")
             f.write("# Base name for output files.\n")
             f.write(f'base_name = "{self.ui.base_name.text()}"\n')
             # f.write("# Path for the ligand's PDB file.\n")
@@ -676,13 +667,13 @@ class KVFinder(ToolInstance):
             )
             box = self.create_box_parameters()
             d = {"SETTINGS": {"visiblebox": box}}
-            toml.dump(o=d, f=f)
+            toml.dump(o=d, f=f, encoder=toml.TomlNumpyEncoder())
 
             f.write("\n[SETTINGS.internalbox]\n")
             f.write("# Coordinates of the internal 3D grid. Used for calculations.\n\n")
-            # box = self.create_box_parameters(is_internal_box=True)
-            # d = {"SETTINGS": {"internalbox": box}}
-            toml.dump(o=d, f=f)
+            box = self.create_box_parameters(is_internal_box=True)
+            d = {"SETTINGS": {"internalbox": box}}
+            toml.dump(o=d, f=f, encoder=toml.TomlNumpyEncoder())
 
         return True
 
@@ -776,27 +767,30 @@ class KVFinder(ToolInstance):
         :param padding: box padding value.
         """
 
-        # cmd = ""
+        models = all_objects(self.session).models
 
-        # # Delete Box object in PyMOL
-        # if "box" in cmd.get_names("all"):
-        #     cmd.delete("box")
-        # # Get dimensions of selected residues
-        # selection = "sele"
-        # if selection in cmd.get_names("selections"):
-        #     ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent(selection)
-        # else:
-        #     ([min_x, min_y, min_z], [max_x, max_y, max_z]) = cmd.get_extent("")
-
+        for model in models:
+            if model.name == "box":
+                model.delete()
 
         sel_atoms = selected_atoms(self.session)
         
-        minCoords = sel_atoms.coords.min(axis=0)
-        maxCoords = sel_atoms.coords.max(axis=0)
-        
-        min_x, min_y, min_z = minCoords[0], minCoords[1], minCoords[2]
-        max_x, max_y, max_z = maxCoords[0], maxCoords[1], maxCoords[2]
-   
+        if len(sel_atoms) > 0 :
+            minCoords = sel_atoms.coords.min(axis=0)
+            maxCoords = sel_atoms.coords.max(axis=0)
+            
+            min_x, min_y, min_z = minCoords[0], minCoords[1], minCoords[2]
+            max_x, max_y, max_z = maxCoords[0], maxCoords[1], maxCoords[2]
+        else:
+            model = self._get_model(self.input_pdb)
+
+            if model:
+                run(self.session, f"sel protein & {model.atomspec}")
+            else:
+                run(self.session, f"sel protein")
+
+        print(f"Min coords: {min_x, min_y, min_z}\nMax coords: {max_x, max_y, max_z}")
+
         # Get center of each dimension (x, y, z)
         self.x = (min_x + max_x) / 2
         self.y = (min_y + max_y) / 2
@@ -841,6 +835,199 @@ class KVFinder(ToolInstance):
 
         self.ui.angle1.setEnabled(True)
         self.ui.angle2.setEnabled(True)
+
+    def delete_box(self) -> None:
+        """
+        Delete box object, disable 'Delete Box' and 'Redraw Box' buttons and enable 'Draw Box' button.
+        """
+
+        # Reset all box variables
+        self.x = 0
+        self.y = 0
+        self.z = 0
+        # self.min_x_set = 0.0
+        # self.max_x_set = 0.0
+        # self.min_y_set = 0.0
+        # self.max_y_set = 0.0
+        # self.min_z_set = 0.0
+        # self.max_z_set = 0.0
+        # self.angle1_set = 0.0
+        # self.angle2_set = 0.0
+        # self.padding_set = 3.5
+
+        # Delete Box and Vertices objects in PyMOL
+        models = all_objects(self.session).models
+
+        for model in models:
+            if model.name == "box":
+                model.delete()       
+
+        # Set Box variables in the interface
+        self.ui.min_x.setValue(self._default.min_x)
+        self.ui.max_x.setValue(self._default.max_x)
+        self.ui.min_y.setValue(self._default.min_y)
+        self.ui.max_y.setValue(self._default.max_y)
+        self.ui.min_z.setValue(self._default.min_z)
+        self.ui.max_z.setValue(self._default.max_z)
+        self.ui.angle1.setValue(self._default.angle1)
+        self.ui.angle2.setValue(self._default.angle2)
+
+        # Change state of buttons in the interface
+        self.ui.button_draw_box.setEnabled(True)
+        self.ui.button_redraw_box.setEnabled(False)
+        self.ui.min_x.setEnabled(False)
+        self.ui.min_y.setEnabled(False)
+        self.ui.min_z.setEnabled(False)
+        self.ui.max_x.setEnabled(False)
+        self.ui.max_y.setEnabled(False)
+        self.ui.max_z.setEnabled(False)
+        self.ui.angle1.setEnabled(False)
+        self.ui.angle2.setEnabled(False)
+
+    def redraw_box(self) -> None:
+        """
+        Redraw box in PyMOL interface.
+        :param padding: box padding.
+        :return: box object.
+        """
+
+
+
+        sel_atoms = selected_atoms(self.session)
+        
+
+        # Provided a selection
+        if len(sel_atoms) > 0:
+            # Get dimensions of selected residues
+            minCoords = sel_atoms.coords.min(axis=0)
+            maxCoords = sel_atoms.coords.max(axis=0)
+            
+            min_x, min_y, min_z = minCoords[0], minCoords[1], minCoords[2]
+            max_x, max_y, max_z = maxCoords[0], maxCoords[1], maxCoords[2]
+
+            if (
+                self.ui.min_x.value() != self.min_x_set
+                or self.ui.max_x.value() != self.max_x_set
+                or self.ui.min_y.value() != self.min_y_set
+                or self.ui.max_y.value() != self.max_y_set
+                or self.ui.min_z.value() != self.min_z_set
+                or self.ui.max_z.value() != self.max_z_set
+                or self.ui.angle1.value() != self.angle1_set
+                or self.ui.angle2.value() != self.angle2_set
+            ):
+                self.min_x_set = self.ui.min_x.value()
+                self.max_x_set = self.ui.max_x.value()
+                self.min_y_set = self.ui.min_y.value()
+                self.max_y_set = self.ui.max_y.value()
+                self.min_z_set = self.ui.min_z.value()
+                self.max_z_set = self.ui.max_z.value()
+                self.angle1_set = self.ui.angle1.value()
+                self.angle2_set = self.ui.angle2.value()
+            # Padding or selection altered
+            else:
+                # Get center of each dimension (x, y, z)
+                self.x = (min_x + max_x) / 2
+                self.y = (min_y + max_y) / 2
+                self.z = (min_z + max_z) / 2
+
+                # Set background box values
+                self.min_x_set = (
+                    round(self.x - (min_x - self.ui.padding.value()), 1)
+                    + self.ui.min_x.value()
+                    - self.min_x_set
+                )
+                self.max_x_set = (
+                    round((max_x + self.ui.padding.value()) - self.x, 1)
+                    + self.ui.max_x.value()
+                    - self.max_x_set
+                )
+                self.min_y_set = (
+                    round(self.y - (min_y - self.ui.padding.value()), 1)
+                    + self.ui.min_y.value()
+                    - self.min_y_set
+                )
+                self.max_y_set = (
+                    round((max_y + self.ui.padding.value()) - self.y, 1)
+                    + self.ui.max_y.value()
+                    - self.max_y_set
+                )
+                self.min_z_set = (
+                    round(self.z - (min_z - self.ui.padding.value()), 1)
+                    + self.ui.min_z.value()
+                    - self.min_z_set
+                )
+                self.max_z_set = (
+                    round((max_z + self.ui.padding.value()) - self.z, 1)
+                    + self.ui.max_z.value()
+                    - self.max_z_set
+                )
+                self.angle1_set = 0 + self.ui.angle1.value()
+                self.angle2_set = 0 + self.ui.angle2.value()
+                self.padding_set = self.ui.padding.value()
+        # Not provided a selection
+        else:
+            if (
+                self.ui.min_x.value() != self.min_x_set
+                or self.ui.max_x.value() != self.max_x_set
+                or self.ui.min_y.value() != self.min_y_set
+                or self.ui.max_y.value() != self.max_y_set
+                or self.ui.min_z.value() != self.min_z_set
+                or self.ui.max_z.value() != self.max_z_set
+                or self.ui.angle1.value() != self.angle1_set
+                or self.ui.angle2.value() != self.angle2_set
+            ):
+                self.min_x_set = self.ui.min_x.value()
+                self.max_x_set = self.ui.max_x.value()
+                self.min_y_set = self.ui.min_y.value()
+                self.max_y_set = self.ui.max_y.value()
+                self.min_z_set = self.ui.min_z.value()
+                self.max_z_set = self.ui.max_z.value()
+                self.angle1_set = self.ui.angle1.value()
+                self.angle2_set = self.ui.angle2.value()
+
+            if self.padding_set != self.ui.padding.value():
+                # Prepare dimensions without old padding
+                min_x = self.padding_set - self.min_x_set
+                max_x = self.max_x_set - self.padding_set
+                min_y = self.padding_set - self.min_y_set
+                max_y = self.max_y_set - self.padding_set
+                min_z = self.padding_set - self.min_z_set
+                max_z = self.max_z_set - self.padding_set
+
+                # Get center of each dimension (x, y, z)
+                self.x = (min_x + max_x) / 2
+                self.y = (min_y + max_y) / 2
+                self.z = (min_z + max_z) / 2
+
+                # Set background box values
+                self.min_x_set = round(self.x - (min_x - self.ui.padding.value()), 1)
+                self.max_x_set = round((max_x + self.ui.padding.value()) - self.x, 1)
+                self.min_y_set = round(self.y - (min_y - self.ui.padding.value()), 1)
+                self.max_y_set = round((max_y + self.ui.padding.value()) - self.y, 1)
+                self.min_z_set = round(self.z - (min_z - self.ui.padding.value()), 1)
+                self.max_z_set = round((max_z + self.ui.padding.value()) - self.z, 1)
+                self.angle1_set = self.ui.angle1.value()
+                self.angle2_set = self.ui.angle2.value()
+                self.padding_set = self.ui.padding.value()
+
+        # Set Box variables in the interface
+        self.ui.min_x.setValue(self.min_x_set)
+        self.ui.max_x.setValue(self.max_x_set)
+        self.ui.min_y.setValue(self.min_y_set)
+        self.ui.max_y.setValue(self.max_y_set)
+        self.ui.min_z.setValue(self.min_z_set)
+        self.ui.max_z.setValue(self.max_z_set)
+        self.ui.angle1.setValue(self.angle1_set)
+        self.ui.angle2.setValue(self.angle2_set)
+
+        models = all_objects(self.session).models
+
+        for model in models:
+            if model.name == "box":
+                model.delete()    
+
+        # Redraw box
+        self.draw_box()
         
     def box_geometry(self, p1, p2, p3, p4, p5, p6, p7, p8):
         #       v2 ---- v3
@@ -853,7 +1040,48 @@ class KVFinder(ToolInstance):
         #          v4 ---- v5
 
         vertices = np.array([
-            p2, p7, p8, p1, p5, p6, p4, p3
+
+            # -x, v0-v4-v2-v6
+            # [llb[0], llb[1], llb[2]],
+            # [llb[0], llb[1], urf[2]],
+            # [llb[0], urf[1], llb[2]],
+            # [llb[0], urf[1], urf[2]],
+            p1, p3, p4, p7,
+
+            # -y, v0-v1-v4-v5
+            # [llb[0], llb[1], llb[2]],
+            # [urf[0], llb[1], llb[2]],
+            # [llb[0], llb[1], urf[2]],
+            # [urf[0], llb[1], urf[2]],
+            p1, p2, p3, p5,
+
+            # -z, v1-v0-v3-v2
+            # [urf[0], llb[1], llb[2]],
+            # [llb[0], llb[1], llb[2]],
+            # [urf[0], urf[1], llb[2]],
+            # [llb[0], urf[1], llb[2]],
+            p2, p1, p6, p4,
+
+            # x, v5-v1-v7-v3
+            # [urf[0], llb[1], urf[2]],
+            # [urf[0], llb[1], llb[2]],
+            # [urf[0], urf[1], urf[2]],
+            # [urf[0], urf[1], llb[2]],
+            p5, p2, p8, p6,
+
+            # y, v3-v2-v7-v6
+            # [urf[0], urf[1], llb[2]],
+            # [llb[0], urf[1], llb[2]],
+            # [urf[0], urf[1], urf[2]],
+            # [llb[0], urf[1], urf[2]],
+            p6, p4, p8, p7,
+
+            # z, v4-v5-v6-v7
+            # [llb[0], llb[1], urf[2]],
+            # [urf[0], llb[1], urf[2]],
+            # [llb[0], urf[1], urf[2]],
+            # [urf[0], urf[1], urf[2]],
+            p3, p5, p7, p8,
         ], dtype=np.float32)
 
         normals = np.array([
@@ -1095,13 +1323,10 @@ class KVFinder(ToolInstance):
         
         varray, normals, tarray = self.box_geometry(P1, P2, P3, P4, P5, P6, P7, P8)
 
-        s = _show_surface(self.session, varray=varray, tarray=tarray, color = (190, 190, 190, 200), mesh=False,
+        self.s = _show_surface(self.session, varray=varray, tarray=tarray, color = (255, 0, 255, 100), mesh=False,
                       center=None, rotation=None, qrotation=None, coordinate_system=None,
                       slab=None, model_id= None, shape_name="box")
         
-        print("Já passei do _show_surface")
-
-
   
     def create_box_parameters(
         self, is_internal_box=False
@@ -1261,13 +1486,13 @@ class KVFinder(ToolInstance):
 
                     # from chimerax.pdb import save_pdb
                     # save_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{name}.pdb'), models=[structure])
-                    # break
+                    break
             else:
                 print(f"WARNING: I didn't find any structure with the name {name}")
 
             # sel_atoms = all_atoms(self.session)
 
-        self.cprint(f"Info: Selected Atoms {len(sel_atoms)}")
+        # self.cprint(f"Info: Selected Atoms {len(sel_atoms)}")
 
         atomNP = np.zeros(shape=(len(sel_atoms), 8), dtype='<U32')
         vdw = pyKVFinder.read_vdw()
@@ -1278,8 +1503,8 @@ class KVFinder(ToolInstance):
                 radius = vdw[residue_name][atom_name]
             else:
                 radius = vdw["GEN"][atom_element]
-                self.cprint(f"Warning: Atom {atom_name} of residue {residue_name} \  not found in dictionary.")
-                self.cprint(f"Warning: Using generic atom {atom_element} \radius: {radius} \u00c5.")
+                # self.cprint(f"Warning: Atom {atom_name} of residue {residue_name} \  not found in dictionary.")
+                # self.cprint(f"Warning: Using generic atom {atom_element} \radius: {radius} \u00c5.")
 
             try:
                 atomNP[i] = [str(atom.residue.number), str(atom.residue.chain)[1:], residue_name, atom_name, atom.coord[0], atom.coord[1], atom.coord[2], radius ]

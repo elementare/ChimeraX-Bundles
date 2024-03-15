@@ -238,10 +238,6 @@ class KVFinder(ToolInstance):
         self.ui.button_draw_box.clicked.connect(self.set_box)
         self.ui.button_delete_box.clicked.connect(self.delete_box)
         self.ui.button_redraw_box.clicked.connect(self.redraw_box)
-        
-        # Ligand Adjustment
-        self.ui.refresh_ligand.clicked.connect(lambda: self.refresh(self.ui.ligand))
-
 
     def _optionCheck(self, btn):
 
@@ -326,14 +322,6 @@ class KVFinder(ToolInstance):
         combo_box.clear()
 
         if combo_box == self.ui.input:
-            pdbNames = all_atomic_structures(self.session).names
-            if isinstance(pdbNames, np.ndarray):
-                for item in pdbNames:
-                    combo_box.addItem(item)
-            else:
-                print(f"{pdbNames}, {type(pdbNames)}")
-        
-        if combo_box == self.ui.ligand:
             pdbNames = all_atomic_structures(self.session).names
             if isinstance(pdbNames, np.ndarray):
                 for item in pdbNames:
@@ -583,33 +571,12 @@ class KVFinder(ToolInstance):
             QMessageBox.critical(self.tool_window, "Error", "Select an input PDB!")
             return False   
         
-        # Save ligand pdb
-        if self.ui.ligand_adjustment.isChecked():
-            if self.ui.ligand.currentText() != "":
-                ligandModel = self._get_model(self.ui.ligand.currentText())
-                
-                if ligandModel:
-                    ligand = os.path.join(
-                        os.path.join(
-                            basedir, f"{self.ui.ligand.currentText()}.ligand.pdb"
-                        )
-                    )
-                    save_pdb(self.session, ligand, models=[ligandModel])
-            else:
-                from PyQt5.QtWidgets import QMessageBox
+        # if self.ui.box_adjustment.isChecked():
+        #     if "box" not in cmd.get_names("all"):
+        #         from PyQt5.QtWidgets import QMessageBox
 
-                QMessageBox.critical(self.tool_window, "Error", "Select an ligand PDB!")
-                return False
-        else:
-            ligand = "-"
-
-        if self.ui.box_adjustment.isChecked():
-            box = self._get_model("box")
-            if not box:
-                from PyQt5.QtWidgets import QMessageBox
-
-                QMessageBox.critical(self.tool_window, "Error", "Draw a box in PyMOL!")
-                return False
+        #         QMessageBox.critical(self, "Error", "Draw a box in PyMOL!")
+        #         return False
 
         with open(os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), "parameters.toml"), "w") as f:
             f.write("# TOML configuration file for parKVFinder software.\n")
@@ -924,7 +891,10 @@ class KVFinder(ToolInstance):
         :return: box object.
         """
 
+
+
         sel_atoms = selected_atoms(self.session)
+        
 
         # Provided a selection
         if len(sel_atoms) > 0:
@@ -2904,7 +2874,6 @@ class Ui_pyKVFinder(object):
         self.ligand = QtWidgets.QComboBox(self.hframe17)
         self.ligand.setObjectName("ligand")
         self.horizontalLayout_18.addWidget(self.ligand)
-        self.extract = QtWidgets.QPushButton()
         self.refresh_ligand = QtWidgets.QPushButton(self.hframe17)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)

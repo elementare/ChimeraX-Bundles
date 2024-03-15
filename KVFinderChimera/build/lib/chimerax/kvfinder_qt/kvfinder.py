@@ -238,6 +238,10 @@ class KVFinder(ToolInstance):
         self.ui.button_draw_box.clicked.connect(self.set_box)
         self.ui.button_delete_box.clicked.connect(self.delete_box)
         self.ui.button_redraw_box.clicked.connect(self.redraw_box)
+        
+        # Ligand Adjustment
+        self.ui.refresh_ligand.clicked.connect(lambda: self.refresh(self.ui.ligand))
+
 
     def _optionCheck(self, btn):
 
@@ -329,7 +333,15 @@ class KVFinder(ToolInstance):
             else:
                 print(f"{pdbNames}, {type(pdbNames)}")
         
+        if combo_box == self.ui.ligand:
 
+            pdbNames = all_atomic_structures(self.session).names
+            if isinstance(pdbNames, np.ndarray):
+                for item in pdbNames:
+                    combo_box.addItem(item)
+            else:
+                print(f"{pdbNames}, {type(pdbNames)}")
+        
         return    
     
     def _run_pyKVFinder(self, atomic, box_adjustment = False):
@@ -345,15 +357,20 @@ class KVFinder(ToolInstance):
         step = self.ui.step_size.value()
         ignore_backbone = True if self.ui.ignore_backbone_checkbox.isChecked() else False
         surface =  'SES' if self.ui.surface.currentText() == 'Solvent Excluded Surface (SES)' else 'SAS'
-
+        if self.ui.ligand_adjustment.isChecked() and self.ui.ligand.currentText() != self.ui.input.currentText() and self.ui.ligand.currentText() != "":
+            ligand = self.extract_pdb_session(self.ui.ligand.currentText(), selected=False)
+            ligand_cutoff = self.ui.ligand_cutoff.value()
+        else:
+            ligand = None
+            ligand_cutoff = 5
         if not box_adjustment:
             vertices = pyKVFinder.get_vertices(atomic, probe_out=probe_out, step=step)
-            ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
+            ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, latomic=ligand, ligand_cutoff = ligand_cutoff, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, surface=surface)
         else:
             fn = os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), "parameters.toml")
             print(fn)
             vertices, atomic = pyKVFinder.get_vertices_from_file(fn, atomic, step=step, probe_in=probe_in, probe_out=probe_out)
-            ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, box_adjustment=True, surface=surface)
+            ncavs, cavities = pyKVFinder.detect(atomic, vertices, step=step, latomic=ligand, ligand_cutoff = ligand_cutoff, probe_in=probe_in, probe_out=probe_out, removal_distance=removal_distance, volume_cutoff=volume_cutoff, box_adjustment=True, surface=surface)
         elapsed_time = time.time() - start
         print(f"> Cavities detected: {ncavs}")
         print(f"> Elapsed time: {elapsed_time:.2f} seconds")
@@ -571,12 +588,33 @@ class KVFinder(ToolInstance):
             QMessageBox.critical(self.tool_window, "Error", "Select an input PDB!")
             return False   
         
-        # if self.ui.box_adjustment.isChecked():
-        #     if "box" not in cmd.get_names("all"):
-        #         from PyQt5.QtWidgets import QMessageBox
+        # Save ligand pdb
+        if self.ui.ligand_adjustment.isChecked():
+            if self.ui.ligand.currentText() != "":
+                ligandModel = self._get_model(self.ui.ligand.currentText())
+                
+                if ligandModel:
+                    ligand = os.path.join(
+                        os.path.join(
+                            basedir, f"{self.ui.ligand.currentText()}.ligand.pdb"
+                        )
+                    )
+                    save_pdb(self.session, ligand, models=[ligandModel])
+            else:
+                from PyQt5.QtWidgets import QMessageBox
 
-        #         QMessageBox.critical(self, "Error", "Draw a box in PyMOL!")
-        #         return False
+                QMessageBox.critical(self.tool_window, "Error", "Select an ligand PDB!")
+                return False
+        else:
+            ligand = "-"
+
+        if self.ui.box_adjustment.isChecked():
+            box = self._get_model("box")
+            if not box:
+                from PyQt5.QtWidgets import QMessageBox
+
+                QMessageBox.critical(self.tool_window, "Error", "Draw a box in ChimeraX!")
+                return False
 
         with open(os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), "parameters.toml"), "w") as f:
             f.write("# TOML configuration file for parKVFinder software.\n")
@@ -585,14 +623,14 @@ class KVFinder(ToolInstance):
             f.write("\n[FILES_PATH]\n")
             f.write("# The path of van der Waals radii dictionary for parKVFinder.\n")
             f.write(f'dictionary = "{self.ui.dictionary.text()}"\n')
-            # f.write("# The path of the input PDB file.\n")
-            # f.write(f'pdb = "{pdb}"\n')
+            f.write("# The path of the input PDB file.\n")
+            f.write(f'pdb = "{pdb}"\n')
             f.write("# The path of the output directory.\n")
             f.write(f"output = '{self.ui.output_dir_path.text()}'\n")
             f.write("# Base name for output files.\n")
             f.write(f'base_name = "{self.ui.base_name.text()}"\n')
-            # f.write("# Path for the ligand's PDB file.\n")
-            # f.write(f'ligand = "{ligand}"\n')
+            f.write("# Path for the ligand's PDB file.\n")
+            f.write(f'ligand = "{ligand}"\n')
 
             f.write("\n[SETTINGS]\n")
             f.write("# Settings for parKVFinder software.\n")
@@ -891,10 +929,7 @@ class KVFinder(ToolInstance):
         :return: box object.
         """
 
-
-
         sel_atoms = selected_atoms(self.session)
-        
 
         # Provided a selection
         if len(sel_atoms) > 0:
@@ -1785,7 +1820,7 @@ class KVFinder(ToolInstance):
             spec = model.atomspec
             # Return if no cavity is selected
             if len(cavs) > 0:
-                command = f"color {spec}:{cavs[0]} red"
+                command = f"color {spec}:{cavs[0]} blue; color {spec}:{cavs[0]}@HA red"
             elif len(deselect) > 0:
                 command = f"color {spec}:{deselect[0]} white"
             else:
@@ -1872,17 +1907,12 @@ class KVFinder(ToolInstance):
         
             # Return if no cavity is selected
             if len(cavs) > 0:
-                cavs = ":".join(cavs)
+                cavs = "@HA:".join(cavs)
                 
                 if inpModel:
-                    command = f"contacts {inpModel.atomspec} restrict {spec}:{cavs} reveal false select true; select subtract {inpModel.atomspec}; color byattribute occupancy sel palette yellow:white:blue"
+                    command = f"color byattribute occupancy {inpModel.atomspec}:{cavs}@HA palette yellow:white:blue"
                 else:
-                    command = f"contacts protein restrict {spec}:{cavs} reveal false select true; select subtract protein; color byattribute occupancy sel palette yellow:white:blue"
-                
-                # command = f"color byattribute occupancy {spec}:"
-                # while len(cavs) > 0:
-                #     command = f"{command}{cavs.pop(0)}:"
-                # command = command[:-1] + " palette yellow:white:blue"
+                    command = f"color byattribute occupancy {spec}:{cavs}@HA palette yellow:white:blue"
 
                 run(self.session, command)
 
@@ -2874,6 +2904,7 @@ class Ui_pyKVFinder(object):
         self.ligand = QtWidgets.QComboBox(self.hframe17)
         self.ligand.setObjectName("ligand")
         self.horizontalLayout_18.addWidget(self.ligand)
+        self.extract = QtWidgets.QPushButton()
         self.refresh_ligand = QtWidgets.QPushButton(self.hframe17)
         sizePolicy = QtWidgets.QSizePolicy(QtWidgets.QSizePolicy.Fixed, QtWidgets.QSizePolicy.Fixed)
         sizePolicy.setHorizontalStretch(0)

@@ -16,6 +16,7 @@ from chimerax.core.tools import ToolInstance
 from chimerax.atomic import StructureSeq, Structure, selected_atoms, all_atoms, structure_atoms, all_atomic_structures
 from chimerax.core.commands import run
 from chimerax.std_commands import style
+from chimerax.atomic.structure import AtomicStructure
 from os.path import expanduser
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QMainWindow, QDialog
@@ -28,16 +29,6 @@ import sys
 import toml
 
 dialog = None
-
-"""
-va, nv, ta = cx.surface.box_geometry((0,0,20), (10, 10, 10))
-
-shape = cx.shape.shape
-model = self.s.models[0]
-centers = np.mean(model.atoms.residues.centers, axis=0)
-print(centers)
-s = shape._show_surface(self.s, va, ta, color = (190,190,190,50), center = centers, rotation = None, qrotation = None, coordinate_system = None, mesh = False, slab = None, model_id = None, shape_name="box") 
-"""
 
 class _Default(object):
     def __init__(self):
@@ -88,13 +79,6 @@ class _Default(object):
 
 class KVFinder(ToolInstance):
 
-    # Inheriting from ToolInstance makes us known to the ChimeraX tool mangager,
-    # so we can be notified and take appropriate action when sessions are closed,
-    # saved, or restored, and we will be listed among running tools and so on.
-    #
-    # If cleaning up is needed on finish, override the 'delete' method
-    # but be sure to call 'delete' from the superclass at the end.
-
     SESSION_ENDURING = False    # Does this instance persist when session closes
     SESSION_SAVE = True         # We do save/restore in sessions
     #help = "help:user/tools/tutorial.html"
@@ -111,7 +95,7 @@ class KVFinder(ToolInstance):
         self.app = QtWidgets.QApplication(sys.argv)
         self.tool_window = QtWidgets.QMainWindow()
         self.tool_window.fill_context_menu = self.fill_context_menu
-        self.tool_window.setWindowTitle("ChimeraX KVFinder (Qt)")
+        self.tool_window.setWindowTitle("pyKVFinder ChimeraX Tool (Qt)")
         self.ui = Ui_pyKVFinder()
         self.ui.setupUi(self.tool_window)  
 
@@ -255,10 +239,10 @@ class KVFinder(ToolInstance):
         """
         #from pymol import cmd
         from PyQt5.QtWidgets import QMessageBox, QCheckBox
-        """
+
         # Restore Results Tab
         if not is_startup:
-            reply = QMessageBox(self)
+            reply = QMessageBox(self.tool_window)
             reply.setText("Also restore Results Visualization tab?")
             reply.setWindowTitle("Restore Values")
             reply.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
@@ -268,21 +252,19 @@ class KVFinder(ToolInstance):
             reply.layout.addWidget(reply.checkbox, 1, 2)
             if reply.exec_() == QMessageBox.Yes:
                 # Remove cavities, residues and pdbs (input, ligand, cavity)
-                cmd.delete("cavities")
-                cmd.delete("residues")
+
                 if self.input_pdb and reply.checkbox.isChecked():
-                    cmd.delete(self.input_pdb)
-                if self.ligand_pdb and reply.checkbox.isChecked():
-                    cmd.delete(self.ligand_pdb)
+                    input_pdb = self._get_model(self.input_pdb)
+                    input_pdb.delete()
                 if self.cavity_pdb:
-                    cmd.delete(self.cavity_pdb)
+                    cavity_pdb = self._get_model(self.cavity_pdb)
+                    cavity_pdb.delete()
                 results = self.input_pdb = self.ligand_pdb = self.cavity_pdb = None
-                cmd.frame(1)
 
                 # Clean results
                 self.clean_results()
                 self.results_file_entry.clear()
-        """
+
         # Restore PDB and ligand input
         self.refresh(self.ui.input)
         self.refresh(self.ui.ligand)
@@ -345,6 +327,7 @@ class KVFinder(ToolInstance):
         return    
     
     def _run_pyKVFinder(self, atomic, box_adjustment = False):
+
         import time
         print(
             f"\n[==> Running pyKVFinder for: {os.path.join(self.ui.output_dir_path.text(), 'KV_Files', self.ui.base_name.text(), f'{self.ui.input.currentText()}')}"
@@ -410,7 +393,11 @@ class KVFinder(ToolInstance):
         elif ncavs == 0:
             QtWidgets.QMessageBox.warning(self.tool_window, "Warning!", "No cavities found!")
     
-    def run(self) -> None:
+    def run(self):
+        """This function calls extract_pdb_session to obtain the desired atomic structure, 
+        and then invokes _run_pyKVFinder to identify the cavities.
+
+        """
         if self.save_parameters():
             model = self._get_model(self.ui.input.currentText())
             spec = model.atomspec
@@ -428,17 +415,14 @@ class KVFinder(ToolInstance):
                 atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
                 self._run_pyKVFinder(atomic)    
             elif self.region_option == "All ligands without solvent":
-                run(self.session, f"sel {spec} & solvent")
+                run(self.session, f"sel {spec} & ~solvent")
                 atomic = self.extract_pdb_session(selected=True, name=self.ui.input.currentText())
                 self._run_pyKVFinder(atomic)    
             else:
 
                 QtWidgets.QMessageBox.critical(
                     self.tool_window, "Error!", "An error occurred during cavity detection!"
-                )
-                return False                   
-                
-                #ncavs = self.get_number_of_cavities()
+                )             
 
         else:
             from PyQt5.QtWidgets import QMessageBox
@@ -448,7 +432,6 @@ class KVFinder(ToolInstance):
                 "Error",
                 "An error occurred while creating the parameters file! Check the parKVFinder parameters!",
             )
-            return False
 
     def load_results(self) -> None:
 
@@ -718,20 +701,18 @@ class KVFinder(ToolInstance):
 
     def load_file(self, fname, name) -> None:
 
-        # Remove previous results in objects with same cavity name
-        # for obj in cmd.get_names("all"):
-        #     if name == obj:
-        #         cmd.delete(obj)
+        model = self._get_model(name)
+
+        if model:
+            model.delete()
 
         # Load cavity filename
         if os.path.exists(fname):
             from chimerax.pdb import open_pdb
-            # models, status_message = open_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'output_cavity_{self.ui.input.currentText()}'))
+
             models, status_message = open_pdb(self.session, fname)
             self.session.models.add(models)
-            # cmd.load(fname, name, zoom=0)
-            # cmd.hide("everything", name)
-            # cmd.show("nonbonded", name)
+
 
     def clean_results(self) -> None:
         # Input File
@@ -883,15 +864,15 @@ class KVFinder(ToolInstance):
         self.x = 0
         self.y = 0
         self.z = 0
-        # self.min_x_set = 0.0
-        # self.max_x_set = 0.0
-        # self.min_y_set = 0.0
-        # self.max_y_set = 0.0
-        # self.min_z_set = 0.0
-        # self.max_z_set = 0.0
-        # self.angle1_set = 0.0
-        # self.angle2_set = 0.0
-        # self.padding_set = 3.5
+        self.min_x_set = 0.0
+        self.max_x_set = 0.0
+        self.min_y_set = 0.0
+        self.max_y_set = 0.0
+        self.min_z_set = 0.0
+        self.max_z_set = 0.0
+        self.angle1_set = 0.0
+        self.angle2_set = 0.0
+        self.padding_set = 3.5
 
         # Delete Box and Vertices objects in PyMOL
         models = all_objects(self.session).models
@@ -924,7 +905,7 @@ class KVFinder(ToolInstance):
 
     def redraw_box(self) -> None:
         """
-        Redraw box in PyMOL interface.
+        Redraw box in ChimeraX interface.
         :param padding: box padding.
         :return: box object.
         """
@@ -1065,6 +1046,7 @@ class KVFinder(ToolInstance):
         self.draw_box()
         
     def box_geometry(self, p1, p2, p3, p4, p5, p6, p7, p8):
+
         #       v2 ---- v3
         #        |\      |\
         #        | v6 ---- v7 = urf
@@ -1077,45 +1059,21 @@ class KVFinder(ToolInstance):
         vertices = np.array([
 
             # -x, v0-v4-v2-v6
-            # [llb[0], llb[1], llb[2]],
-            # [llb[0], llb[1], urf[2]],
-            # [llb[0], urf[1], llb[2]],
-            # [llb[0], urf[1], urf[2]],
             p1, p3, p4, p7,
 
             # -y, v0-v1-v4-v5
-            # [llb[0], llb[1], llb[2]],
-            # [urf[0], llb[1], llb[2]],
-            # [llb[0], llb[1], urf[2]],
-            # [urf[0], llb[1], urf[2]],
             p1, p2, p3, p5,
 
             # -z, v1-v0-v3-v2
-            # [urf[0], llb[1], llb[2]],
-            # [llb[0], llb[1], llb[2]],
-            # [urf[0], urf[1], llb[2]],
-            # [llb[0], urf[1], llb[2]],
             p2, p1, p6, p4,
 
             # x, v5-v1-v7-v3
-            # [urf[0], llb[1], urf[2]],
-            # [urf[0], llb[1], llb[2]],
-            # [urf[0], urf[1], urf[2]],
-            # [urf[0], urf[1], llb[2]],
             p5, p2, p8, p6,
 
             # y, v3-v2-v7-v6
-            # [urf[0], urf[1], llb[2]],
-            # [llb[0], urf[1], llb[2]],
-            # [urf[0], urf[1], urf[2]],
-            # [llb[0], urf[1], urf[2]],
             p6, p4, p8, p7,
 
             # z, v4-v5-v6-v7
-            # [llb[0], llb[1], urf[2]],
-            # [urf[0], llb[1], urf[2]],
-            # [llb[0], urf[1], urf[2]],
-            # [urf[0], urf[1], urf[2]],
             p3, p5, p7, p8,
         ], dtype=np.float32)
 
@@ -1174,6 +1132,7 @@ class KVFinder(ToolInstance):
 
         This method calculates each vertice of the custom box. Then, it draws and connects them on the PyMOL viewer as a object named 'box'.
         """
+
         from math import cos, pi, sin
 
         # Convert angle
@@ -1359,10 +1318,9 @@ class KVFinder(ToolInstance):
         varray, normals, tarray = self.box_geometry(P1, P2, P3, P4, P5, P6, P7, P8)
 
         self.s = _show_surface(self.session, varray=varray, tarray=tarray, color = (255, 0, 255, 100), mesh=False,
-                      center=None, rotation=None, qrotation=None, coordinate_system=None,
-                      slab=None, model_id= None, shape_name="box")
+                    center=None, rotation=None, qrotation=None, coordinate_system=None, 
+                    slab=None, model_id= None, shape_name="box")
         
-  
     def create_box_parameters(
         self, is_internal_box=False
     ):
@@ -1484,6 +1442,7 @@ class KVFinder(ToolInstance):
         Callback for the "Browse ..." button
         Open a QFileDialog to select a directory.
         """
+
         from PyQt5.QtWidgets import QFileDialog
         from PyQt5.QtCore import QDir
 
@@ -1510,6 +1469,29 @@ class KVFinder(ToolInstance):
         return len(results["RESULTS"]["VOLUME"].keys())
     
     def extract_pdb_session(self, name, selected=True):
+        """Extract the PDB of a specific model.
+        By default, the `selected` option is True, so it will extract the PDB
+        of selected atoms in the model {name}. When `selected` is False, this function extracts
+        the PDB of all atoms inside the model.
+
+        Parameters
+        ----------
+        name : str
+            Name of the model.
+        selected : bool, optional
+            Controls whether the function will return the entire model or only selected atoms. 
+            Defaults to True.
+
+        Raises
+        ------
+        AssertionError
+            If the function cannot find the model {name}, it raises an exception error.
+
+        Returns
+        -------
+        numpy.ndarray
+            An array containing the atomic information.
+        """
 
         if selected:
             sel_atoms = selected_atoms(self.session)
@@ -1518,16 +1500,10 @@ class KVFinder(ToolInstance):
             for structure in structures:
                 if structure.name == name:
                     sel_atoms = structure.atoms
-
-                    # from chimerax.pdb import save_pdb
-                    # save_pdb(self.session, os.path.join(self.ui.output_dir_path.text(), 'KV_Files', f'{name}.pdb'), models=[structure])
                     break
             else:
-                print(f"WARNING: I didn't find any structure with the name {name}")
+                raise AssertionError(f"WARNING: I didn't find any structure with the name {name}")
 
-            # sel_atoms = all_atoms(self.session)
-
-        # self.cprint(f"Info: Selected Atoms {len(sel_atoms)}")
 
         atomNP = np.zeros(shape=(len(sel_atoms), 8), dtype='<U32')
         vdw = pyKVFinder.read_vdw()
@@ -1538,8 +1514,8 @@ class KVFinder(ToolInstance):
                 radius = vdw[residue_name][atom_name]
             else:
                 radius = vdw["GEN"][atom_element]
-                # self.cprint(f"Warning: Atom {atom_name} of residue {residue_name} \  not found in dictionary.")
-                # self.cprint(f"Warning: Using generic atom {atom_element} \radius: {radius} \u00c5.")
+                self.cprint(f"Warning: Atom {atom_name} of residue {residue_name} \  not found in dictionary.")
+                self.cprint(f"Warning: Using generic atom {atom_element} \radius: {radius} \u00c5.")
 
             try:
                 atomNP[i] = [str(atom.residue.number), str(atom.residue.chain)[1:], residue_name, atom_name, atom.coord[0], atom.coord[1], atom.coord[2], radius ]
@@ -1598,6 +1574,7 @@ class KVFinder(ToolInstance):
         Callback for the "Browse ..." button
         Open a QFileDialog to select a file.
         """
+
         from PyQt5.QtWidgets import QFileDialog
         from PyQt5.QtCore import QDir
 
@@ -1667,7 +1644,7 @@ class KVFinder(ToolInstance):
             self.ui.residues_list.addItem(index)
         return
     
-    def _get_model(self, name) -> None:
+    def _get_model(self, name) -> None | AtomicStructure:
         objects = all_objects(self.session)
         models = objects.models
         
@@ -1675,7 +1652,7 @@ class KVFinder(ToolInstance):
             if model.name == name:
                 return model
         else:       
-            return False
+            return None
 
     def _deselect_all_items(self, list_widget):
         for index in range(list_widget.count()):
@@ -1689,6 +1666,8 @@ class KVFinder(ToolInstance):
             self._deselect_all_items(widget)
 
     def show_residues(self) -> None:
+        """Show the residues in structure
+        """
 
         # Select items of list2
         list1 = self.ui.residues_list
@@ -1716,9 +1695,6 @@ class KVFinder(ToolInstance):
             for residue in results["RESULTS"]["RESIDUES"][cav]:
                 if residue not in residues:
                     residues.append(residue)
-        
-
-
 
         model = self._get_model(self.input_pdb)
 
@@ -1753,10 +1729,19 @@ class KVFinder(ToolInstance):
         else:
             print(f"Didn't find the model {self.input_pdb}")
 
-        
     def show_default_view(self) -> None:
+        """    Color all cavities with white.
+
+        This method is responsible for coloring all cavities within the structure with white.
+
+        Returns
+        -------
+        None
+            This method does not return anything; it only modifies the color of the cavities.
+        """
 
         model = self._get_model(self.cavity_pdb)
+
 
         if model:
             spec = model.atomspec
@@ -1765,7 +1750,18 @@ class KVFinder(ToolInstance):
             self._reset_areas()
         else:
             print(f"Didn't find the model {self.cavity_pdb}")
+
     def show_depth_view(self) -> None:
+        """
+        Color all cavities using the depth attribute.
+
+        This method is responsible for coloring all cavities within the structure based on their depth attribute.
+
+        Returns
+        -------
+        None
+            This method does not return anything; it only modifies the color of the cavities.
+        """
 
         model = self._get_model(self.cavity_pdb)
 
@@ -1778,6 +1774,16 @@ class KVFinder(ToolInstance):
             print(f"Didn't find the model {self.cavity_pdb}")
 
     def show_hydropathy_view(self) -> None:
+        """
+        Color all cavities using the hydropath attribute.
+
+        This method is responsible for coloring all cavities within the structure based on their hydropath attribute.
+
+        Returns
+        -------
+        None
+            This method does not return anything; it only modifies the color of the cavities.
+        """
 
         model = self._get_model(self.cavity_pdb)
         inpModel = self._get_model(self.input_pdb)
@@ -1791,8 +1797,24 @@ class KVFinder(ToolInstance):
         else:
             print(f"Didn't find the model {self.cavity_pdb}")
 
-
     def show_cavities(self, list1, list2) -> None:
+        """   
+        Color the atoms of selected cavities.
+
+        This method colors the atoms of selected cavities. It uses blue for pseudoatoms with HA bonds
+        and red for pseudoatoms that do not form bonds.
+
+        Parameters
+        ----------
+        list1 : list
+            A list of QtListItem representing pseudoatoms.
+        list2 : list
+            A list of QtListItem representing pseudoatoms.
+
+        Returns
+        -------
+        None
+        """
 
         # Get items from list1
         cavs = []
@@ -1832,6 +1854,22 @@ class KVFinder(ToolInstance):
             print(f"Didn't find the model {self.cavity_pdb}")
 
     def show_depth(self, list1, list2) -> None:
+        """
+        Color atoms by depth attribute using a rainbow palette.
+
+        This method colors atoms based on their depth attribute using a rainbow color palette.
+
+        Parameters
+        ----------
+        list1 : list
+            A list of QtListItem representing average depth.
+        list2 : list
+            A list of QtListItem representing maximum depth.
+
+        Returns
+        -------
+        None
+        """
 
         # Get items from list1
         cavs = []
@@ -1879,6 +1917,20 @@ class KVFinder(ToolInstance):
             print(f"Didn't find the model {self.cavity_pdb}")
 
     def show_hydropathy(self, list1) -> None:
+        """
+        Color atoms in selected cavities by hydropathy factor using a yellow-white-blue color palette.
+
+        This method colors atoms within selected cavities based on their hydropathy factor using a yellow-white-blue color palette.
+
+        Parameters
+        ----------
+        list1 : list
+            A list of QtListItem representing atoms within selected cavities.
+
+        Returns
+        -------
+        None
+        """
 
         # Get items from list1
         cavs = []
